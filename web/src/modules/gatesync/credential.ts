@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
+import { credentialFormatPrefix, isOpaqueCredentialFormat } from './credential-format.ts';
 
 export const GATESYNC_CREDENTIAL_VERSION = 1 as const;
-const PREFIX = 'whodoo.ticket.v1.';
-const OPAQUE_TOKEN = /^[A-Za-z0-9_-]{43}$/;
+const PREFIX = credentialFormatPrefix();
+export { isOpaqueCredentialFormat } from './credential-format.ts';
 
 /** GateSync-local IDs; no shared booking/event ID types exist yet. */
 export type TicketId = string;
@@ -29,9 +30,8 @@ export type ParsedCredential = { readonly ok: true; readonly digest: CredentialD
 
 /** QR data is only an unpredictable bearer token. Never encode PII or ticket fields. */
 export function digestOpaqueCredential(value: unknown): ParsedCredential {
-  if (typeof value !== 'string' || value.length !== PREFIX.length + 43 || !value.startsWith(PREFIX)) return { ok: false };
+  if (!isOpaqueCredentialFormat(value)) return { ok: false };
   const token = value.slice(PREFIX.length);
-  if (!OPAQUE_TOKEN.test(token)) return { ok: false };
   const bytes = Buffer.from(token, 'base64url');
   if (bytes.byteLength !== 32 || bytes.toString('base64url') !== token) return { ok: false };
   const digest = createHash('sha256').update(PREFIX, 'utf8').update(bytes).digest('hex');
