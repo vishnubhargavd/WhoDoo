@@ -39,9 +39,14 @@
         <button class="small danger" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "blocked"}'
                 data-prompt="What is blocking you?" data-field="blocker_note" data-required>Report blocker</button>
         <button class="small success" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "done"}'>Mark done</button>
-      {% else %}
-        <button class="small secondary" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "in_progress"}'>Reopen</button>
       {% endif %}
+    </div>
+    {% endif %}
+    {# A finished task often cost something: go straight to a claim for it. Offered even after the
+       event has closed, which is when receipts tend to turn up. #}
+    {% if t.status == "done" %}
+    <div class="actions">
+      <a class="button small" href="/expenses/new?task_id={{ t.id }}">Submit reimbursement form</a>
     </div>
     {% endif %}
   </div>

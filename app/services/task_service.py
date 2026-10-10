@@ -19,7 +19,7 @@ from app.core.errors import bad_request, conflict, forbidden, not_found
 from app.models.crewpulse import CrewTask, CrewTaskActivity
 from app.models.shared import Event, User
 from app.schemas.crewpulse import AssigneeOut, TaskActivityOut, TaskCreate, TaskOut, TaskStatusChange, TaskUpdate
-from app.services import autopilot, event_service, shared_directory
+from app.services import autopilot, event_service, registration_service, shared_directory
 from app.services.event_service import utcnow
 
 OPEN_EVENT_STATUSES = ("draft", "published")
@@ -36,10 +36,18 @@ def _ensure_open(event: Event) -> None:
         raise conflict("event_closed", f"Tasks of a {event.status} event cannot be changed")
 
 
-async def _check_assignee(db: AsyncSession, club_id: uuid.UUID, assignee_id: uuid.UUID) -> None:
+# Who the "Allocate task to" list offers. Officers run the event; the work goes to these roles.
+ALLOCATABLE_ROLES = ("member", "volunteer")
+
+
+async def _check_assignee(db: AsyncSession, club_id: uuid.UUID, assignee_id: uuid.UUID, event: Event) -> None:
     person = await shared_directory.get_user(db, assignee_id)
     if person is None or person.club_id != club_id:
         raise bad_request("invalid_assignee", "Tasks can only be assigned to people in this club")
+    # Someone who registered to attend is a participant at this event, not crew.
+    if await registration_service.is_participant(db, event.id, person):
+        raise conflict("assignee_is_participant", f"{person.full_name} is registered to attend this event as a "
+                                                  "participant, so they cannot be given tasks for it.")
 
 
 async def _flush_unique(db: AsyncSession) -> None:
@@ -95,9 +103,12 @@ async def list_mine(db: AsyncSession, user: CurrentUser) -> list[CrewTask]:
     return list(await db.scalars(stmt))
 
 
-async def assignable_people(db: AsyncSession, club_id: uuid.UUID) -> list[AssigneeOut]:
+async def assignable_people(db: AsyncSession, club_id: uuid.UUID, event_id: uuid.UUID | None = None) -> list[AssigneeOut]:
+    """Members and volunteers a task on this event can be allocated to: nobody who is attending it."""
     users: list[User] = await shared_directory.list_users(db, club_id)
-    return [AssigneeOut(id=u.id, full_name=u.full_name, role=u.role) for u in users]
+    attending = await registration_service.participant_user_ids(db, event_id, club_id) if event_id else set()
+    return [AssigneeOut(id=u.id, full_name=u.full_name, role=u.role)
+            for u in users if u.role in ALLOCATABLE_ROLES and u.id not in attending]
 
 
 async def activity(db: AsyncSession, user: CurrentUser, task_id: uuid.UUID) -> list[TaskActivityOut]:
@@ -119,7 +130,7 @@ async def create_task(
     if data.due_at and data.due_at <= now:
         raise bad_request("due_in_past", "The deadline must be in the future")
     if data.assignee_id:
-        await _check_assignee(db, user.club_id, data.assignee_id)
+        await _check_assignee(db, user.club_id, data.assignee_id, event)
 
     task = CrewTask(club_id=user.club_id, event_id=event.id, created_by=user.id, status="todo",
                     **data.model_dump())
@@ -144,8 +155,8 @@ async def update_task(
         changes["assignee_id"] = None
     if "due_at" in changes and changes["due_at"] and changes["due_at"] != task.due_at and changes["due_at"] <= now:
         raise bad_request("due_in_past", "The deadline must be in the future")
-    if changes.get("assignee_id"):
-        await _check_assignee(db, user.club_id, changes["assignee_id"])
+    if changes.get("assignee_id") and changes["assignee_id"] != task.assignee_id:
+        await _check_assignee(db, user.club_id, changes["assignee_id"], event)
 
     if "assignee_id" in changes and changes["assignee_id"] != task.assignee_id:
         _log(db, task, user, "assigned", task.assignee_id, changes["assignee_id"])

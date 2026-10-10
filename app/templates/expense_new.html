@@ -42,7 +42,8 @@
     <h2>2. Claim details</h2>
     <form id="claim-form" class="stack">
       <input type="hidden" name="receipt_id">
-      <label>Title <input type="text" name="title" minlength="3" maxlength="120" required placeholder="e.g. Bake sale supplies"></label>
+      <label>Title <input type="text" name="title" minlength="3" maxlength="120" required placeholder="e.g. Bake sale supplies"
+                          value="{{ from_task.title if from_task else '' }}"></label>
       <div class="fields">
         <label>Total amount (₹) <input type="number" name="amount" min="0.01" step="0.01" required>
           <span id="amount-hint" class="muted"></span></label>
@@ -55,12 +56,12 @@
         <label>Event
           <select name="event_id">
             <option value="">Not for an event</option>
-            {% for event in events %}<option value="{{ event.id }}">{{ event.name }}</option>{% endfor %}
+            {% for event in events %}<option value="{{ event.id }}" {% if from_task and from_task.event_id == event.id %}selected{% endif %}>{{ event.name }}</option>{% endfor %}
           </select>
         </label>
       </div>
       <label>Vendor <input type="text" name="vendor_name" maxlength="120" placeholder="Shop or supplier"></label>
-      <label>Description <textarea name="description" minlength="3" required placeholder="What was bought and why"></textarea></label>
+      <label>Description <textarea name="description" minlength="3" required placeholder="What was bought and why">{{ ("For the task: " ~ from_task.title) if from_task else "" }}</textarea></label>
       <div class="actions">
         <button type="submit" id="submit-claim" disabled>Submit claim</button>
         <span class="muted" id="submit-hint">Read a receipt first.</span>

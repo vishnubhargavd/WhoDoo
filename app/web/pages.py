@@ -19,6 +19,7 @@ from app.core.dependencies import (
     require_approver,
     require_finance_admin,
 )
+from app.models.crewpulse import CrewTask
 from app.models.ledger import ENTRY_TYPES, EXPENSE_CATEGORIES, PAYMENT_STATUSES, SOURCE_MODULES
 from app.schemas.ledger import LedgerFilters
 from app.core.errors import AppError
@@ -252,13 +253,22 @@ async def my_expenses(request: Request, user: CurrentUser = Depends(get_current_
 
 
 @router.get("/expenses/new")
-async def new_expense(request: Request, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def new_expense(
+    request: Request, task_id: uuid.UUID | None = None, user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     events = await shared_directory.list_events(db, user.club_id)
+    # Arriving from a finished task: start the claim with that task's event and title filled in.
+    # Only the person's own task is read; anything else is ignored and the form opens blank.
+    task = await db.get(CrewTask, task_id) if task_id else None
+    if task is not None and (task.assignee_id != user.id or task.club_id != user.club_id):
+        task = None
     return render(
         request,
         "expense_new.html",
         user,
         events=events,
+        from_task=task,
         categories=EXPENSE_CATEGORIES,
         approval_limit=get_settings().expense_auto_approval_limit,
     )
