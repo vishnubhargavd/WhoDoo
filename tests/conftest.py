@@ -26,31 +26,20 @@ from sqlalchemy import text  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.security import create_access_token  # noqa: E402
 from app.db.database import SessionLocal, asyncpg_dsn  # noqa: E402
-from app.db.migrate import run_migrations  # noqa: E402
+from app.db.migrate import run_migrations, run_pending_migrations  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.shared import Club, Event, User  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
 async def _schema():
-    """Rebuild the disposable test database: the real migrations, then the pending FairSeat
-    ones, which `make migrate` does not apply anywhere else."""
-    import asyncpg
-
-    from app.db.migrate import MIGRATIONS_DIR
-
+    """Rebuild the disposable test database: the real migrations, then the pending ones
+    (FairSeat, MemberCore, GateSync, Connect, CertiDoo, LegacyVault), which `make migrate` does not apply."""
     url = get_settings().database_url
     assert "test" in url.rsplit("/", 1)[-1], f"Refusing to reset a non-test database: {url}"
     assert get_settings().database_is_local, f"Refusing to reset a database that is not local: {url}"
     await run_migrations(asyncpg_dsn(url), reset=True)
-    conn = await asyncpg.connect(asyncpg_dsn(url))
-    try:
-        for path in sorted((MIGRATIONS_DIR / "pending").glob("*.sql")):
-            async with conn.transaction():
-                await conn.execute(path.read_text())
-                await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", f"pending/{path.name}")
-    finally:
-        await conn.close()
+    await run_pending_migrations(asyncpg_dsn(url))
 
 
 @pytest.fixture(scope="session")

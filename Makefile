@@ -7,7 +7,7 @@ PORT    ?= 8000
 PG_BIN  ?= $(shell brew --prefix postgresql@16 2>/dev/null)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install env db-start db-stop db-create migrate seed seed-finance seed-events run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend test-fairseat test-web test-all fairseat-vectors payments stripe-listen receipts psql clean
+.PHONY: help setup install env db-start db-stop db-create migrate migrate-pending seed seed-finance seed-events seed-modules modules seed-all run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend test-fairseat test-modules test-web test-all fairseat-vectors payments stripe-listen receipts psql clean
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -44,13 +44,25 @@ db-create: ## Create the whodoo and whodoo_test databases if missing
 migrate: install ## Apply pending SQL migrations to the database in .env
 	$(PY) -m scripts.migrate
 
+migrate-pending: install ## LOCAL database only: add the tables for Memberships, Tickets, Check-in, Announcements, Certificates, Handover
+	$(PY) -m scripts.migrate
+	$(PY) -m scripts.migrate_pending
+
+seed-modules: install ## Add demo plans, tickets on sale, announcements and handover notes (never deletes; runs once)
+	$(PY) -m scripts.seed_modules_demo
+
+modules: migrate-pending seed-modules ## Switch the optional modules on locally: their tables, then demo data (also set FAIRSEAT_ENABLED=1 in .env)
+
+seed-all: seed modules ## Wipe the local database and load everything: demo data, then the optional modules
+
 seed: seed-finance seed-events ## Wipe the local database and load all demo data (finance, then events)
 
 seed-finance: install ## Wipe the local database and load people, money and merchandise demo data
 	$(PY) -m scripts.seed_finance_demo --reset
 
+# FAIRSEAT_ENABLED=0: a fresh seed has no ticket tables yet (they come with `make modules`).
 seed-events: install ## Add event schedules and volunteer tasks to the seeded club (never deletes; runs once)
-	$(PY) -m scripts.seed_events_demo
+	FAIRSEAT_ENABLED=0 $(PY) -m scripts.seed_events_demo
 
 psql: ## Open a SQL prompt on the local whodoo database
 	$(PG_BIN)/psql -d whodoo
@@ -91,6 +103,9 @@ test-frontend: install ## Run only the landing, sign-in, home and navigation tes
 
 test-fairseat: install ## Run only the FairSeat tests: booking, event settings, integration, payments, pricing (uses whodoo_test)
 	$(PY) -m pytest -q tests/test_fairseat.py tests/test_fairseat_integration.py tests/test_event_tickets.py tests/test_fairseat_payments.py tests/test_fairseat_pricing.py
+
+test-modules: install ## Run only the MemberCore, GateSync, Connect, CertiDoo and LegacyVault tests (uses whodoo_test)
+	$(PY) -m pytest -q tests/test_modules.py
 
 fairseat-vectors: ## Regenerate ticket price test vectors from MemberCore's TypeScript calculator (needs node 22.6+)
 	node --experimental-strip-types --no-warnings scripts/make_ticket_discount_vectors.mjs

@@ -319,8 +319,8 @@ async def test_free_booking_is_confirmed_and_cancelling_revokes_its_tickets(clie
     body = free.json()
     assert (body["status"], body["payment_status"], body["total_price_paise"], body["hold_expires_at"]) == (
         "confirmed", "not_required", 0, None)
-    assert [(ticket["seat_number"], ticket["status"]) for ticket in body["tickets"]] == [(1, "pending_issue"), (2, "pending_issue")]
-    assert await db.scalar(select(func.count()).select_from(EventTicket).where(EventTicket.credential_digest.isnot(None))) == 0
+    assert [(ticket["seat_number"], ticket["status"]) for ticket in body["tickets"]] == [(1, "issued"), (2, "issued")]
+    assert await db.scalar(select(func.count()).select_from(EventTicket).where(EventTicket.credential_digest.isnot(None))) == 2
 
     # Free tickets still obey capacity, and a replay does not issue more.
     assert code(await book(world.outsider, cat)) == "sold_out"

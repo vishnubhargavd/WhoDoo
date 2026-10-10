@@ -124,9 +124,9 @@ async def test_payment_confirms_the_booking_and_posts_one_ledger_entry(client, d
     assert (body["booking"]["status"], body["booking"]["payment_status"], body["booking"]["hold_expires_at"]) == ("confirmed", "paid", None)
     assert body["booking"]["refund_status"] is None and body["booking"]["paid_at"] is not None
 
-    # Two entitlements, with no credential: they admit nobody until GateSync issues one.
-    assert [(t["seat_number"], t["status"]) for t in body["booking"]["tickets"]] == [(1, "pending_issue"), (2, "pending_issue")]
-    assert await db.scalar(select(func.count()).select_from(EventTicket).where(EventTicket.credential_digest.isnot(None))) == 0
+    # Two tickets, each with its own credential from GateSync (only the digest is stored).
+    assert [(t["seat_number"], t["status"]) for t in body["booking"]["tickets"]] == [(1, "issued"), (2, "issued")]
+    assert await db.scalar(select(func.count()).select_from(EventTicket).where(EventTicket.credential_digest.isnot(None))) == 2
 
     saved = await row(db, booking)
     assert saved.stripe_checkout_session_id == session["session_id"] and saved.stripe_payment_intent_id.startswith("pi_mock_")
@@ -143,7 +143,7 @@ async def test_payment_confirms_the_booking_and_posts_one_ledger_entry(client, d
         assert (await client.post(f"{PAY}/stripe/verify", headers=auth(world.member), json={"session_id": session["session_id"]})).json()["outcome"] == "confirmed"
     back = await client.get(f"{PAY}/stripe/return?session_id={session['session_id']}", headers=auth(world.member))
     assert back.status_code == 200 and back.json()["outcome"] == "confirmed"
-    assert len(await ticket_entries(db)) == 1 and await tickets(db, booking) == ["pending_issue"] * 2
+    assert len(await ticket_entries(db)) == 1 and await tickets(db, booking) == ["issued"] * 2
     assert await occupied(db, cat) == 2
     paid_again = await client.post(f"{PAY}/stripe/create-checkout-session", headers=auth(world.member), json={"booking_id": booking["booking_id"]})
     assert paid_again.status_code == 409 and code(paid_again) == "already_paid"
@@ -229,7 +229,7 @@ async def test_declined_payment_issues_nothing_and_can_be_retried(client, db, wo
 
     retry = await pay(world.member, booking)
     assert retry.status_code == 200 and retry.json()["outcome"] == "confirmed"
-    assert len(await ticket_entries(db)) == 1 and await tickets(db, booking) == ["pending_issue"]
+    assert len(await ticket_entries(db)) == 1 and await tickets(db, booking) == ["issued"]
 
 
 async def test_failure_webhook_and_unrelated_events(client, db, world, auth, category, book, checkout):
@@ -294,7 +294,7 @@ async def test_duplicate_and_simultaneous_success_reports_make_one_payment(clien
 
     [entry] = await ticket_entries(db)
     assert entry.amount == Decimal("900.00")
-    assert await tickets(db, booking) == ["pending_issue"] * 3
+    assert await tickets(db, booking) == ["issued"] * 3
     assert await occupied(db, cat) == 3 and await balance(client, auth, world) == 900.0
     assert await db.scalar(select(func.count()).select_from(TicketPaymentEvent)) == 2
     logged = await db.scalar(select(TicketPaymentEvent).where(TicketPaymentEvent.provider_event_id == "evt_dup_session"))
@@ -341,7 +341,7 @@ async def test_late_payment_is_confirmed_when_the_seats_are_still_free(client, d
 
     late = await pay(world.member, booking, session)
     assert late.status_code == 200 and late.json()["outcome"] == "confirmed"
-    assert await occupied(db, cat) == 2 and await tickets(db, booking) == ["pending_issue"] * 2
+    assert await occupied(db, cat) == 2 and await tickets(db, booking) == ["issued"] * 2
     assert len(await ticket_entries(db)) == 1 and payment_service.get_provider().refunds == {}
 
 
@@ -363,7 +363,7 @@ async def test_late_payment_is_refunded_when_the_seat_went_to_someone_else(clien
 
     saved = await row(db, slow)
     assert _provider.refunds[f"{saved.stripe_payment_intent_id}:refund"] == (saved.stripe_payment_intent_id, 40000)
-    assert await occupied(db, cat) == 1 and await tickets(db, slow) == [] and await tickets(db, quick) == ["pending_issue"]
+    assert await occupied(db, cat) == 1 and await tickets(db, slow) == [] and await tickets(db, quick) == ["issued"]
     # The ledger shows all three movements; only the kept sale remains in the balance.
     kinds = sorted((entry.entry_type, entry.reference_id == saved.id) for entry in await ticket_entries(db))
     assert kinds == [("income", False), ("income", True), ("refund", True)]
@@ -793,7 +793,7 @@ async def test_stripe_ticket_checkout_refund_and_webhook(client, db, world, auth
     assert (line["quantity"], line["price_data"]["currency"], line["price_data"]["unit_amount"]) == (2, "inr", 25000)
     assert sent["metadata"]["ticket_booking_id"] == booking["booking_id"] == sent["payment_intent_data"]["metadata"]["ticket_booking_id"]
     assert "merch_order_id" not in sent["metadata"] and sent["metadata"]["event_id"] == str(gala.id)
-    assert sent["success_url"].endswith("/api/v1/ticket-payments/stripe/return?session_id={CHECKOUT_SESSION_ID}")
+    assert sent["success_url"].endswith("/tickets/return?session_id={CHECKOUT_SESSION_ID}")
     assert sent["expires_at"] - int(datetime.now(timezone.utc).timestamp()) in range(1790, 1801)
     assert (await client.post(f"{PAY}/mock/simulate", headers=auth(world.member), json={"session_id": "cs_test_1"})).status_code == 404
 
