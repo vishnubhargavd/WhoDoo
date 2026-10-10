@@ -82,3 +82,36 @@ def read_receipt(club_id: uuid.UUID, filename: str) -> bytes:
     if not path.is_relative_to(root) or not path.is_file():
         raise not_found("Receipt")
     return path.read_bytes()
+
+
+PRODUCT_IMAGE_ROUTE = "/api/v1/merch/images/"
+
+
+def save_product_image(club_id: uuid.UUID, data: bytes, extension: str, content_type: str) -> str:
+    """Store product image and return its URL."""
+    settings = get_settings()
+    key = f"{club_id}/{uuid.uuid4().hex}{extension}"
+    supabase = get_supabase()
+    if supabase is not None:
+        try:
+            bucket = supabase.storage.from_("merch")
+            bucket.upload(key, data, {"content-type": content_type})
+        except Exception:
+            pass
+    path = Path(settings.upload_dir) / "merch" / key
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return PRODUCT_IMAGE_ROUTE + key
+
+
+def read_product_image(club_id: uuid.UUID, filename: str) -> bytes:
+    """Read product image bytes."""
+    if re.fullmatch(r"[a-f0-9]{32}\.(?:png|jpg|webp)", filename) is None:
+        raise not_found("Product image")
+    key = f"{club_id}/{filename}"
+    root = (Path(get_settings().upload_dir) / "merch").resolve()
+    path = (root / key).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise not_found("Product image")
+    return path.read_bytes()
+

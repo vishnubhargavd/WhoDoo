@@ -19,6 +19,25 @@ from app.services import event_service, fairseat_payments, task_service
 router = APIRouter(prefix="/events", tags=["Event Management"])
 
 
+APPROVED_VENUES = [
+    "Main Hall",
+    "Open Air Theatre",
+    "Auditorium",
+    "Student Activity Center",
+    "Seminar Hall A",
+    "Seminar Hall B",
+    "Campus Grounds",
+    "Lab",
+    "Room 1",
+]
+
+
+@router.get("/venues/catalog", response_model=list[str])
+async def get_venues_catalog() -> list[str]:
+    """List approved campus venue catalog."""
+    return APPROVED_VENUES
+
+
 async def _one(db: AsyncSession, user: CurrentUser, event) -> EventOut:
     return (await event_service.to_out(db, user, [event]))[0]
 

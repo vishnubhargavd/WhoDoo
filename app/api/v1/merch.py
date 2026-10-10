@@ -1,9 +1,11 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db, require_finance_admin
+from app.core.errors import AppError
 from app.schemas.merch import (
     OrderCreate,
     OrderOut,
@@ -14,9 +16,18 @@ from app.schemas.merch import (
     VariantCreate,
     VariantUpdate,
 )
-from app.services import merch_service, payment_service
+from app.services import merch_service, payment_service, storage_service
 
 router = APIRouter(prefix="/merch", tags=["MerchFlow"])
+
+
+@router.get("/images/{club_id}/{filename}")
+async def get_product_image(club_id: uuid.UUID, filename: str):
+    data = await run_in_threadpool(storage_service.read_product_image, club_id, filename)
+    ext = filename.rsplit(".", 1)[-1].lower()
+    media_type = "image/png" if ext == "png" else "image/webp" if ext == "webp" else "image/jpeg"
+    return Response(data, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
 
 
 @router.get("/products", response_model=list[ProductOut])
@@ -54,6 +65,26 @@ async def update_product(
     product = await merch_service.update_product(db, user, product_id, body)
     await db.commit()
     return product
+
+
+@router.post("/products/{product_id}/image", response_model=ProductOut)
+async def upload_product_image(
+    product_id: uuid.UUID,
+    file: UploadFile = File(..., description="Product image as PNG, JPEG or WebP, up to 5 MB"),
+    user: CurrentUser = Depends(require_finance_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ProductOut:
+    data = await file.read(5 * 1024 * 1024 + 1)
+    if len(data) > 5 * 1024 * 1024:
+        raise AppError(413, "file_too_large", "Product image must be 5 MB or smaller")
+    extension, content_type = storage_service.identify_receipt(data)
+    if extension == ".pdf":
+        raise AppError(415, "unsupported_file", "Product image must be PNG, JPEG, or WebP")
+    url = await run_in_threadpool(storage_service.save_product_image, user.club_id, data, extension, content_type)
+    product = await merch_service.update_product(db, user, product_id, ProductUpdate(image_url=url))
+    await db.commit()
+    return product
+
 
 
 @router.post("/products/{product_id}/variants", response_model=ProductOut, status_code=201)

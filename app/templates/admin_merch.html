@@ -25,6 +25,16 @@
     </div>
   </form>
 
+  <div style="display: flex; gap: 16px; align-items: center; margin: 12px 0; padding: 12px; background: var(--card-sub, #f8f9fa); border-radius: 8px">
+    {% if product.image_url %}<img src="{{ product.image_url }}" alt="{{ product.name }}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 6px">
+    {% else %}<div class="noimg" style="width: 50px; height: 50px; border-radius: 6px">{{ product.name[0] }}</div>{% endif %}
+    <form class="actions" enctype="multipart/form-data" method="post" action="/api/v1/merch/products/{{ product.id }}/image"
+          onsubmit="event.preventDefault(); const f=new FormData(this); fetch(this.action,{method:'POST',body:f}).then(()=>location.reload());">
+      <input type="file" name="file" accept="image/png,image/jpeg,image/webp" required style="font-size: 0.85rem">
+      <button type="submit" class="small secondary">Upload image</button>
+    </form>
+  </div>
+
   <div class="table-wrap" style="margin-top: 12px">
     <table>
       <thead><tr><th>SKU</th><th>Size</th><th>Colour</th><th class="num">Price override</th><th>Stock</th><th>Status</th></tr></thead>

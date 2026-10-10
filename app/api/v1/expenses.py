@@ -88,6 +88,16 @@ async def my_claims(
     return await expense_service.list_my_claims(db, user, status)
 
 
+@router.get("/event/{event_id}")
+async def event_expenses(
+    event_id: uuid.UUID,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    return await expense_service.list_event_expenses(db, user, event_id)
+
+
+
 # Declared before /{expense_id} so "approvals" is not read as a claim id.
 @router.get("/approvals", response_model=ApprovalQueue)
 async def approval_queue(

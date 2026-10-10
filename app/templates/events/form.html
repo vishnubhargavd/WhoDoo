@@ -19,7 +19,20 @@
     <div class="fields">
       <label>Starts <input type="datetime-local" name="starts_at" required value="{{ event.starts_at | ist_input if event else '' }}"></label>
       <label>Ends <input type="datetime-local" name="ends_at" required value="{{ event.ends_at | ist_input if event else '' }}"></label>
-      <label>Venue <input type="text" name="venue" maxlength="120" value="{{ (event.venue or '') if event else '' }}" placeholder="e.g. Main Hall"></label>
+      <label>Venue
+        <input list="venue-list" name="venue" maxlength="120" value="{{ (event.venue or '') if event else '' }}" placeholder="Select or type campus venue">
+        <datalist id="venue-list">
+          <option value="Main Hall">Main Hall</option>
+          <option value="Open Air Theatre">Open Air Theatre</option>
+          <option value="Auditorium">Auditorium</option>
+          <option value="Student Activity Center">Student Activity Center</option>
+          <option value="Seminar Hall A">Seminar Hall A</option>
+          <option value="Seminar Hall B">Seminar Hall B</option>
+          <option value="Campus Grounds">Campus Grounds</option>
+          <option value="Lab">Lab</option>
+          <option value="Room 1">Room 1</option>
+        </datalist>
+      </label>
       {% if user.role == "president" %}
       <label>Event lead
         <select name="lead_id">

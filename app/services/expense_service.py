@@ -478,6 +478,29 @@ async def list_my_claims(session: AsyncSession, user: CurrentUser, status: str |
     return await present(session, user, claims)
 
 
+async def list_event_expenses(
+    session: AsyncSession, user: CurrentUser, event_id: uuid.UUID
+) -> dict:
+    """Return event-linked expense claims, totals, and breakdown."""
+    claims = list(await session.scalars(
+        select(ExpenseClaim).where(C.club_id == user.club_id, C.event_id == event_id).order_by(C.expense_date.desc())
+    ))
+    presented = await present(session, user, claims)
+    total_amount = sum(c.amount for c in claims)
+    approved_amount = sum(c.amount for c in claims if c.status in ("approved", "paid"))
+    paid_amount = sum(c.amount for c in claims if c.status == "paid")
+    pending_amount = sum(c.amount for c in claims if c.status == "pending_approval")
+    return {
+        "claims": presented,
+        "total_amount": total_amount,
+        "approved_amount": approved_amount,
+        "paid_amount": paid_amount,
+        "pending_amount": pending_amount,
+        "count": len(claims),
+    }
+
+
+
 async def get_queue(session: AsyncSession, user: CurrentUser) -> ApprovalQueue:
     pending = list(await session.scalars(
         select(ExpenseClaim)

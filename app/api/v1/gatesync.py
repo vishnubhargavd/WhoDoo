@@ -62,3 +62,53 @@ async def assign_staff(event_id: uuid.UUID, body: StaffRequest, user: CurrentUse
     await gatesync_service.assign_staff(db, user, event_id, body.user_id)
     await db.commit()
     return {"event_id": event_id, "user_id": body.user_id, "assigned": True}
+
+
+@router.get("/tickets/{ticket_id}/pdf")
+async def ticket_pdf(ticket_id: uuid.UUID, user: CurrentUser = Depends(get_current_user),
+                     db: AsyncSession = Depends(get_db)):
+    from fastapi.responses import Response
+    from app.services import ticket_pdf_service
+
+    result = await gatesync_service.issue(db, user, ticket_id)
+    await db.commit()
+    ticket, booking, event = await gatesync_service._lock_ticket(db, ticket_id)
+    time_str = event.starts_at.strftime("%a %d %b %Y, %H:%M IST") if event.starts_at else "TBA"
+    is_free = (booking.payment_status == "not_required" or booking.total_price_paise == 0)
+    pdf_bytes = ticket_pdf_service.generate_ticket_pdf(
+        event_name=event.name,
+        venue=event.venue,
+        time_str=time_str,
+        holder_name=user.full_name,
+        seat_number=ticket.seat_number,
+        ticket_id=str(ticket.id),
+        credential=result["credential"],
+        is_free=is_free,
+    )
+    return Response(
+        pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="whodoo-ticket-{ticket_id}.pdf"'},
+    )
+
+
+@router.post("/tickets/{ticket_id}/email")
+async def email_ticket(ticket_id: uuid.UUID, user: CurrentUser = Depends(get_current_user),
+                       db: AsyncSession = Depends(get_db)):
+    from app.services import email_service
+
+    result = await gatesync_service.issue(db, user, ticket_id)
+    await db.commit()
+    ticket, booking, event = await gatesync_service._lock_ticket(db, ticket_id)
+    time_str = event.starts_at.strftime("%a %d %b %Y, %H:%M IST") if event.starts_at else "TBA"
+    email_result = email_service.send_ticket_email(
+        to_email=user.email,
+        recipient_name=user.full_name,
+        event_name=event.name,
+        venue=event.venue,
+        starts_at_str=time_str,
+        credential=result["credential"],
+        ticket_id=str(ticket.id),
+    )
+    return email_result.to_dict()
+

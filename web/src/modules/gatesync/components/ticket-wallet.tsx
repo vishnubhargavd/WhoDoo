@@ -24,7 +24,27 @@ export function TicketWallet({ tickets, issue }: { tickets: StudentTicket[]; iss
       const eligible = ticket.bookingStatus === 'confirmed' && ['paid','not_required'].includes(ticket.paymentStatus) && !['revoked','checked_in','cancelled'].includes(ticket.credentialState ?? '');
       const credential = credentials[ticket.ticketId] ?? null;
       return <div key={ticket.ticketId}><TicketCard record={{ ...ticket, credential, credentialState: credential ? 'issued' : ticket.credentialState }} />
-        {eligible && <button type="button" disabled={!!pending} onClick={() => void show(ticket.ticketId)} className="my-3 min-h-11 rounded-lg bg-teal-700 px-5 font-semibold text-white disabled:opacity-60 print:hidden">{pending === ticket.ticketId ? 'Loading ticket…' : credential ? 'Refresh ticket' : 'Show private QR'}</button>}
+        {eligible && (
+          <div className="my-3 flex flex-wrap items-center gap-2 print:hidden">
+            <button
+              type="button"
+              disabled={!!pending}
+              onClick={() => void show(ticket.ticketId)}
+              className="min-h-11 rounded-lg bg-teal-700 px-5 font-semibold text-white disabled:opacity-60 hover:bg-teal-800 transition"
+            >
+              {pending === ticket.ticketId ? 'Loading ticket…' : credential ? 'Refresh QR' : 'Show private QR'}
+            </button>
+            {credential && (
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="min-h-11 rounded-lg border border-slate-300 bg-white px-4 font-semibold text-slate-700 hover:bg-slate-50 transition"
+              >
+                Print / Save PDF
+              </button>
+            )}
+          </div>
+        )}
       </div>;
     })}</div>
   </section>;

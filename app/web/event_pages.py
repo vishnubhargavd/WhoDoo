@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db
 from app.core.errors import AppError, forbidden
-from app.services import event_service, task_service, ticket_service
+from app.services import event_service, expense_service, task_service, ticket_service
 from app.services.syncsphere import IST
 from app.web.templating import inr, render, templates
 
@@ -81,7 +81,8 @@ async def event_detail_page(
     [out] = await event_service.to_out(db, user, [event])
     tasks = await task_service.to_out(db, user, await task_service.list_for_event(db, event))
     organizer = event_service.can_manage(user, event)
-    context = dict(event=out, tasks=tasks, organizer=organizer, readiness=None, schedule=None, people=[])
+    event_expenses = await expense_service.list_event_expenses(db, user, event_id)
+    context = dict(event=out, tasks=tasks, organizer=organizer, readiness=None, schedule=None, people=[], expenses=event_expenses)
     if organizer:
         context.update(
             readiness=await event_service.readiness(db, user, event),
