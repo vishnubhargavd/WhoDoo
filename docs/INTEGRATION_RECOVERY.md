@@ -118,7 +118,31 @@ provider configuration must be reported separately from local fixtures and mocke
   - Backend verified: `tests/test_demo_readiness.py` (2 passed in 4.12s), `tests/test_events.py` (12 passed in 15.58s), `tests/test_gatesync.py` (8 passed in 15.75s).
   - Commit: `2ae1c67`.
 
-
+- **Batch 4: Final Scope Completion (Supabase Readiness, CertiDoo, LegacyVault)**
+  - **Task 1 — Supabase & External Provider Readiness**:
+    - Reviewed Supabase SSR PKCE login and cookie session handling (`web/src/app/auth/callback/route.ts`, `@supabase/ssr`).
+    - Verified trusted FastAPI ES256/JWKS public key validation and application user resolution via `users.auth_user_id` (`tests/test_auth_supabase.py` 71 passed).
+    - Enforced strict production lockout for `/dev/login`: defense-in-depth in `app/web/dev_auth.py` and `app/core/config.py` rejecting demo authentication when not local or when `AUTH_MODE=supabase`. Verified rejection with test in `tests/test_demo_readiness.py`.
+    - Documented exact environment variables and provider integration architecture in `docs/SUPABASE_DEPLOYMENT.md` and updated `web/.env.example`.
+    - Commit: `0b18835`.
+  - **Task 2 — CertiDoo Verifiable Certificates**:
+    - Implemented migration `060_certidoo.sql` with table `certificates`.
+    - Implemented `app/models/certidoo.py`, `app/schemas/certidoo.py`, and `app/services/certidoo_service.py`.
+    - Verified genuine eligibility backed by GateSync door check-ins (`gatesync_attendance`) and completed volunteer tasks (`crew_tasks`).
+    - Enforced duplicate issuance prevention (`UNIQUE (event_id, recipient_user_id, certificate_type)`) and unauthorized generation blocking.
+    - Added public server-backed certificate verification endpoint (`/api/v1/certificates/verify/{code}`) and recipient view (`/api/v1/certificates/my`).
+    - Created web views and templates (`/certificates`, `/certificates/verify/{code}`).
+    - Verified with focused tests in `tests/test_certidoo.py` (1 passed).
+    - Commit: `3491be3`.
+  - **Task 3 — LegacyVault Leadership Continuity**:
+    - Implemented migration `061_legacyvault.sql` with table `legacy_handover_records`.
+    - Implemented `app/models/legacyvault.py`, `app/schemas/legacyvault.py`, and `app/services/legacyvault_service.py`.
+    - Enforced strict club isolation and officer access control (`president`, `treasurer`, `event_lead`); ordinary members are blocked with HTTP 403.
+    - Preserved author, role, timestamps, and event references in an immutable audit trail.
+    - Added continuity snapshot aggregating past events, officer roster, and financial balance without duplicating databases.
+    - Created web view and template (`/legacyvault`).
+    - Verified with focused tests in `tests/test_legacyvault.py` (1 passed) and `tests/test_demo_readiness.py` (3 passed).
+    - Commit: `95a39e8`.
 
 ## Implementation Checklist
 
@@ -143,6 +167,7 @@ provider configuration must be reported separately from local fixtures and mocke
 7. WhoDoo Connect: **Implemented** (Broadcast announcements, audience targeting, pinned alerts, feed).
 8. Event Autopilot: **Implemented** (Event readiness monitoring, task dependency flags, scheduling aids).
 9. SyncSphere: **Implemented** (Interactive campus event calendar, fixed approved venues catalog, conflict-aware scheduling).
-10. CertiDoo + LegacyVault: **Partially implemented** (Foundational schema/models and navigation hooks prepared; certificates generation deferred to P2 post-deadline).
+10. CertiDoo: **Implemented** (Verifiable certificates, GateSync check-in / CrewPulse contribution eligibility, public verification reference, anti-duplicate).
+11. LegacyVault: **Implemented** (Institutional memory handover archives, continuity snapshots, club isolation, officer access controls).
 
 
