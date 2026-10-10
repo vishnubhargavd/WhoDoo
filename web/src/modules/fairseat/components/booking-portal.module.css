@@ -1,0 +1,40 @@
+.portal { color: #0f172a; display: grid; gap: 2rem; }
+.portal h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.15; font-weight: 750; letter-spacing: -.04em; margin: .8rem 0; }
+.portal h2 { font-size: 1.4rem; font-weight: 700; }
+.portal h3 { font-size: 1.15rem; font-weight: 650; margin: .7rem 0; }
+.portal h4 { font-weight: 650; margin-bottom: .8rem; }
+.portal p { line-height: 1.7; overflow-wrap: anywhere; }
+.hero { background: linear-gradient(115deg, #042f2e, #115e59); color: white; border-radius: 1.5rem; padding: clamp(1.5rem, 5vw, 3rem); }
+.hero p { max-width: 42rem; color: #d1fae5; }
+.eyebrow { font-size: .8rem; letter-spacing: .05em; font-weight: 650; }
+.chips { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.5rem; font-size: .8rem; }
+.chips span { border: 1px solid #5eead4; border-radius: 2rem; padding: .4rem .8rem; }
+.banner { background: #fffbeb; border: 1px solid #fcd34d; border-radius: 1rem; padding: 1.2rem; color: #78350f; }
+.sectionHeader { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.sectionHeader span, .count { color: #475569; font-size: .85rem; }
+.empty { padding: 3rem 1.5rem; text-align: center; border: 1px dashed #94a3b8; border-radius: 1.3rem; background: #f8fafc; }
+.empty p { max-width: 36rem; margin: .7rem auto 1.2rem; color: #475569; }
+.emptyIcon { display: inline-grid; place-items: center; width: 3rem; height: 3rem; background: #ccfbf1; border-radius: 1rem; color: #115e59; font-size: 1.8rem; }
+.portal a { color: #115e59; text-decoration: underline; text-underline-offset: 3px; }
+.filters { display: grid; gap: 1rem; margin: 1.5rem 0; }
+.portal label { display: grid; gap: .5rem; font-size: .9rem; font-weight: 600; }
+.portal input, .portal select { min-width: 0; width: 100%; min-height: 2.9rem; border: 1px solid #94a3b8; background: white; border-radius: .6rem; padding: .7rem; color: #0f172a; }
+.portal :is(input, select, button, a):focus-visible, .portal [tabindex="-1"]:focus { outline: 3px solid #0d9488; outline-offset: 4px; }
+.portal button { min-height: 2.9rem; background: #115e59; color: white; border-radius: .6rem; padding: .7rem 1rem; font-weight: 600; cursor: pointer; }
+.portal button:disabled { background: #e2e8f0; color: #475569; cursor: not-allowed; }
+.grid { display: grid; gap: 1rem; margin-top: 1rem; }
+.card { padding: 1.5rem; background: white; border: 1px solid #cbd5e1; border-radius: 1rem; display: grid; align-content: start; gap: .5rem; overflow-wrap: anywhere; }
+.card button { margin-top: .8rem; }
+.badge { font-size: .8rem; background: #f1f5f9; color: #334155; padding: .35rem .6rem; border-radius: .4rem; width: fit-content; }
+.details { display: grid; gap: 2rem; background: white; border: 1px solid #cbd5e1; border-radius: 1.3rem; padding: clamp(1.2rem, 4vw, 2rem); }
+.details h2 { margin: 1rem 0; overflow-wrap: anywhere; }
+.details form { display: grid; align-content: start; gap: 1rem; min-width: 0; }
+.portal dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: .65rem; margin: 1rem 0; font-size: .9rem; }
+.portal dt { color: #475569; }
+.portal dd { overflow-wrap: anywhere; }
+.price { background: #f0fdfa; padding: 1rem; border-radius: .9rem; }
+.price p, .notice { font-size: .9rem; }
+.notice { overflow-wrap: anywhere; }
+@media (min-width: 640px) { .filters { grid-template-columns: 2fr 1fr 1fr; } .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 900px) { .details { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .portal *, .portal *::before, .portal *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
