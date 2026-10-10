@@ -27,7 +27,20 @@ This function is a quote calculator, not authorization. Future callers must
 load membership from trusted server data and use a server clock. Never accept
 client membership flags as authoritative. Booking transactions must revalidate.
 
-Validation in the preparation environment: all 15 automated tests passed on
-Node 24.21.0. Type checking could not execute because TypeScript was unavailable
-and npm installation failed with ENOTFOUND for registry.npmjs.org. Run the three
-commands above locally before considering this component fully verified.
+Phase 2A adds a read-only repository interface and `quoteMemberTicket` service.
+Application user IDs and Supabase Auth user IDs have distinct local TypeScript
+types. Labelling an application ID does not authenticate it; the caller must
+supply server-verified context after the approved identity mapping. No shared
+identity contract, authentication, database or Supabase adapter is implemented.
+
+The service checks trusted club scope, retrieves membership by application user
+and club, and delegates all pricing and eligibility to the unchanged calculator.
+A missing record returns the calculator's full-price quote. Wrong-user or
+wrong-club repository records and storage failures throw stable errors; storage
+errors never fall back to a guest quote. The future adapter must define how
+renewal/history rows produce one deterministic record under the approved schema.
+
+Tests use an in-memory repository. `npm run typecheck` also verifies that an Auth
+user ID cannot be passed to the repository in place of an application user ID.
+No new dependencies are required. Importing `.ts` paths and erasable TypeScript
+syntax support the existing Node 24 test runner without a compilation step.
