@@ -111,3 +111,13 @@ async def test_all_web_pages_load_cleanly(client, world, auth):
     for path, user, expected_code in routes:
         res = await client.get(path, headers=auth(user), follow_redirects=True)
         assert res.status_code == expected_code, f"Route {path} failed with {res.status_code}: {res.text[:200]}"
+
+
+async def test_dev_login_strictly_forbidden_when_demo_auth_disabled(client, monkeypatch):
+    """Ensure that in production / non-demo configurations, /dev/login is rejected."""
+    # When demo_auth is False, /dev/login returns 404
+    monkeypatch.setattr(get_settings(), "demo_auth", False)
+    res_get = await client.get("/dev/login")
+    assert res_get.status_code == 404
+    res_post = await client.post("/dev/login", data={"user_id": str(uuid.uuid4())})
+    assert res_post.status_code == 404

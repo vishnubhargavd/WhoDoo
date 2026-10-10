@@ -27,12 +27,18 @@ def _safe_next(target: str | None) -> str:
 
 @router.get("/dev/login")
 async def login_page(request: Request, next: str = "/home", db: AsyncSession = Depends(get_db)):
+    settings = get_settings()
+    if not (settings.demo_auth and settings.database_is_local):
+        raise not_found("Page")
     users = await shared_directory.list_users(db)
     return render(request, "dev_login.html", users=users, next=_safe_next(next))
 
 
 @router.post("/dev/login")
 async def login(user_id: uuid.UUID = Form(...), next: str = Form("/home"), db: AsyncSession = Depends(get_db)):
+    settings = get_settings()
+    if not (settings.demo_auth and settings.database_is_local):
+        raise not_found("Page")
     user = await shared_directory.get_user(db, user_id)
     if user is None:
         raise not_found("User")
