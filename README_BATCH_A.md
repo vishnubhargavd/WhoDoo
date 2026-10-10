@@ -59,3 +59,34 @@ Before switching Razorpay on, check with a real test account:
 ## Configuration
 
 See the Batch A section of `.env.example`. Defaults: payments mock, payouts mock, reminders hourly.
+
+## 4. Volunteer duplicate and clash review (Batch B)
+
+Migration `pending/043_member2_crew_shifts.sql` adds an optional shift (start and end time) to a task, in a new table. The `crew_tasks` table itself is unchanged.
+
+Workflow:
+1. The organizer adds a task, or changes who owns one.
+2. The page calls `POST /api/v1/events/{id}/tasks/review`.
+3. If something is flagged, a dialog lists the issues and suggests up to three people who are free at that time.
+4. The organizer then picks someone else, cancels, or chooses **Assign anyway** with a reason of at least 5 characters.
+
+What gets flagged, checked against the person's unfinished tasks in open events:
+
+| Code | Meaning | Can override |
+|---|---|---|
+| `exact_duplicate` | same task title, same event | **never** |
+| `near_duplicate` | nearly the same title in the same event ("Book DJ" / "Book the DJ") | yes |
+| `overlapping_shift` | shifts overlap within one event | yes |
+| `event_clash` | a duty in another event at an overlapping time (a task's time is its shift, or else its event's time) | yes |
+| `over_limit` | more than `CREW_MAX_OPEN_TASKS` unfinished tasks (0 = no limit) | yes |
+
+- **Checks are repeated on save.** Saving runs the same checks again on the server, under a per-person database lock, so two organizers assigning the same volunteer at once can't both get through.
+- **Overrides are recorded.** Each override goes into `audit_logs` (`crewpulse.assignment_override`) and the task's activity trail, with the reason.
+- **Nothing is removed or moved.** No task is ever deleted or reassigned automatically.
+
+## Stripe test mode (verified)
+
+- **Tested end to end:** with `PAYMENT_PROVIDER=stripe` and an `sk_test_` key, a membership dues payment was completed on Stripe's hosted checkout with test card 4242 4242 4242 4242. On return, the app checked the session with Stripe, activated the membership and posted one ₹500.00 income entry to the ledger.
+- **Use the same address as `APP_BASE_URL`.** Stripe sends the payer back to `APP_BASE_URL`. Open the app at that exact address (for example `http://localhost:8000`), or the sign-in cookie won't carry over.
+- **Webhooks need the Stripe CLI.** For webhooks as well as the return page, run `make stripe-listen` and put the printed `whsec_` in `STRIPE_WEBHOOK_SECRET`.
+- **Stripe can't send money to UPI IDs.** Reimbursement payouts therefore use `PAYOUTS_PROVIDER=mock` (no money moves) or RazorpayX.

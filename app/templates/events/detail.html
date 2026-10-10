@@ -238,7 +238,8 @@
           </td>
           <td>
             {% if t.can_edit %}
-            <select data-assign="/api/v1/tasks/{{ t.id }}" aria-label="Owner of {{ t.title }}">
+            <select data-assign="/api/v1/tasks/{{ t.id }}" data-event="{{ event.id }}" data-task="{{ t.id }}"
+                    data-title="{{ t.title }}" aria-label="Owner of {{ t.title }}">
               <option value="">Unassigned</option>
               {% for person in people %}
               <option value="{{ person.id }}" {% if t.assignee_id == person.id %}selected{% endif %}>{{ person.full_name }}</option>
@@ -246,7 +247,8 @@
             </select>
             {% else %}{{ t.assignee_name or "Unassigned" }}{% endif %}
           </td>
-          <td class="nowrap">{{ t.due_at | ist('%d %b, %H:%M') }}</td>
+          <td class="nowrap">{{ t.due_at | ist('%d %b, %H:%M') }}
+            {% if t.shift_starts_at %}<div class="muted" style="font-size: 12px">Shift {{ t.shift_starts_at | ist('%d %b %H:%M') }}–{{ t.shift_ends_at | ist('%H:%M') }}</div>{% endif %}</td>
           <td><span class="badge {{ t.status }}">{{ t.status | label }}</span>
             <div class="muted nowrap" style="font-size: 12px">{{ "Completed " ~ (t.completed_at | ist('%d %b, %H:%M')) if t.completed_at else "Updated " ~ (t.updated_at | ist('%d %b, %H:%M')) }}</div></td>
           {% if organizer %}
@@ -269,7 +271,7 @@
   {% if organizer and event.status in ("draft", "published") %}
   <details class="add-task" {% if not tasks %}open{% endif %}>
     <summary>Add a task</summary>
-    <form class="stack" data-api="POST" action="/api/v1/events/{{ event.id }}/tasks">
+    <form class="stack" data-task-form data-event="{{ event.id }}" action="/api/v1/events/{{ event.id }}/tasks">
       <div class="fields">
         <label>Task <input type="text" name="title" minlength="3" maxlength="120" required placeholder="e.g. Book the DJ"></label>
         <label>Owner
@@ -279,12 +281,17 @@
           </select>
         </label>
         <label>Due (IST) <input type="datetime-local" name="due_at"></label>
+        {% if shifts_on %}
+        <label>Shift starts (IST) <input type="datetime-local" name="shift_starts_at"></label>
+        <label>Shift ends (IST) <input type="datetime-local" name="shift_ends_at"></label>
+        {% endif %}
         <label>Priority
           <select name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
         </label>
       </div>
       <label>Details <textarea name="description" maxlength="1000" placeholder="Optional"></textarea></label>
       <label class="check"><input type="checkbox" name="is_critical"> Critical: the event cannot happen without this</label>
+      <p class="muted">Before a task is given to someone it is checked for duplicate tasks and clashing duties, and you review anything found.</p>
       <div class="actions"><button type="submit">Add task</button></div>
     </form>
   </details>

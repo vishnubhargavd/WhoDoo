@@ -92,7 +92,9 @@ async def _error(request: Request, status_code: int, code: str, message: str, de
             {"error": {"code": code, "message": message, "details": details}}, status_code=status_code
         )
     if status_code == 401 and settings.demo_auth:
-        return RedirectResponse(f"/dev/login?next={quote(request.url.path)}", status_code=303)
+        # Keep the query string: a payment return carries its session_id in it.
+        target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return RedirectResponse(f"/dev/login?next={quote(target)}", status_code=303)
     user = await _signed_in_user(request)
     return render(request, "error.html", user, status_code=status_code, code=code, message=message)
 

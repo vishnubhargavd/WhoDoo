@@ -83,7 +83,8 @@ async def event_detail_page(
     [out] = await event_service.to_out(db, user, [event])
     tasks = await task_service.to_out(db, user, await task_service.list_for_event(db, event))
     organizer = event_service.can_manage(user, event)
-    context = dict(event=out, tasks=tasks, organizer=organizer, readiness=None, schedule=None, people=[])
+    context = dict(event=out, tasks=tasks, organizer=organizer, readiness=None, schedule=None, people=[],
+                   shifts_on=modules.migrated("crew_shifts"))
     if organizer:
         context.update(
             readiness=await event_service.readiness(db, user, event),

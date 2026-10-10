@@ -147,7 +147,7 @@ def test_navigation_is_role_aware(monkeypatch):
     assert navigation(None, "/")["sections"] == []
     assert navigation(Person("member"), "/")["coming_soon"] == (
         "Memberships", "Tickets", "Check-in", "Announcements", "Certificates", "Handover",
-        "Profile & UPI", "Renewal reminders", "Event budgets")
+        "Profile & UPI", "Renewal reminders", "Event budgets", "Volunteer shifts")
 
     monkeypatch.setattr(modules, "_tables", frozenset(modules.MODULES))   # every module migrated
     assert links("member")["Tickets"] == ["Book tickets", "My tickets"]              # the door is for door staff

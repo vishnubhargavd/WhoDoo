@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     low_ticket_percent: int = Field(10, ge=0, le=100)
     low_ticket_seats: int = Field(5, ge=0, le=1000)
 
+    # CrewPulse: most unfinished tasks one person may hold before an assignment is flagged (0 = no limit).
+    crew_max_open_tasks: int = Field(0, ge=0, le=100)
+
     # FairSeat ticket booking. Off by default: the routes answer 404 until it is switched on.
     # With demo sign-in anyone can act as anyone, so it may only be on against a local database.
     fairseat_enabled: bool = False

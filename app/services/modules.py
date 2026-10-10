@@ -27,6 +27,8 @@ MODULES = {
     "profile": ("Profile & UPI", "user_payment_profiles"),
     "reminders": ("Renewal reminders", "membership_renewal_reminders"),
     "budgets": ("Event budgets", "event_budgets"),
+    # Batch B (migrations/pending/043)
+    "crew_shifts": ("Volunteer shifts", "crew_task_shifts"),
 }
 NEEDS_FAIRSEAT = ("tickets", "checkin")
 

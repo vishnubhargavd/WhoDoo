@@ -105,3 +105,14 @@ class EventBudget(Base):
     budget_paise: Mapped[int] = mapped_column(BigInteger)
     updated_by: Mapped[uuid.UUID] = _uuid()
     updated_at: Mapped[datetime] = updated_at_col()
+
+
+class CrewTaskShift(Base):
+    """migrations/pending/043: the time slot of a CrewPulse task, when it has one."""
+
+    __tablename__ = "crew_task_shifts"
+
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    club_id: Mapped[uuid.UUID] = _uuid()
+    starts_at: Mapped[datetime] = _moment(nullable=False)
+    ends_at: Mapped[datetime] = _moment(nullable=False)

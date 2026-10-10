@@ -13,10 +13,24 @@ TaskPriority = Literal["low", "medium", "high"]
 class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    @field_validator("due_at", check_fields=False)
+    @field_validator("due_at", "shift_starts_at", "shift_ends_at", check_fields=False)
     @classmethod
     def _aware(cls, value):
         return as_aware(value)
+
+    @field_validator("override_reason", check_fields=False)
+    @classmethod
+    def _reason(cls, value):
+        return value or None
+
+    @model_validator(mode="after")
+    def _shift_pair(self):
+        start, end = getattr(self, "shift_starts_at", None), getattr(self, "shift_ends_at", None)
+        if (start is None) != (end is None):
+            raise invalid("Give both a shift start and a shift end, or neither")
+        if start is not None and end <= start:
+            raise invalid("The shift must end after it starts")
+        return self
 
     @field_validator("description", "blocker_note", check_fields=False)
     @classmethod
@@ -31,6 +45,10 @@ class TaskCreate(_Input):
     priority: TaskPriority = "medium"
     is_critical: bool = False
     due_at: datetime | None = None
+    # Batch B: the task's time slot, and the reason when assigning despite a flagged clash.
+    shift_starts_at: datetime | None = None
+    shift_ends_at: datetime | None = None
+    override_reason: str | None = Field(None, min_length=5, max_length=500)
 
 
 class TaskUpdate(_Input):
@@ -43,6 +61,10 @@ class TaskUpdate(_Input):
     priority: TaskPriority | None = None
     is_critical: bool | None = None
     due_at: datetime | None = None
+    shift_starts_at: datetime | None = None
+    shift_ends_at: datetime | None = None
+    clear_shift: bool = False
+    override_reason: str | None = Field(None, min_length=5, max_length=500)
 
     @model_validator(mode="after")
     def _one_assignee_change(self):
@@ -83,6 +105,8 @@ class TaskOut(BaseModel):
     updated_at: datetime
     completed_at: datetime | None
     risks: list[str] = []
+    shift_starts_at: datetime | None = None
+    shift_ends_at: datetime | None = None
     can_edit: bool = False
     can_update_status: bool = False
 
@@ -103,3 +127,44 @@ class AssigneeOut(BaseModel):
     id: uuid.UUID
     full_name: str
     role: str
+
+
+class AssignmentReviewIn(BaseModel):
+    """What the organizer is about to save. `task_id` when editing an existing task."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=120)
+    assignee_id: uuid.UUID
+    task_id: uuid.UUID | None = None
+    shift_starts_at: datetime | None = None
+    shift_ends_at: datetime | None = None
+
+    @field_validator("shift_starts_at", "shift_ends_at")
+    @classmethod
+    def _aware(cls, value):
+        return as_aware(value)
+
+
+class AssignmentIssue(BaseModel):
+    code: Literal["exact_duplicate", "near_duplicate", "overlapping_shift", "event_clash", "over_limit"]
+    blocking: bool               # exact duplicates can never be overridden
+    message: str
+    task_id: uuid.UUID | None = None
+    task_title: str | None = None
+    event_id: uuid.UUID | None = None
+    event_name: str | None = None
+
+
+class AssignmentSuggestion(BaseModel):
+    id: uuid.UUID
+    full_name: str
+    role: str
+    open_tasks: int
+
+
+class AssignmentReviewOut(BaseModel):
+    ok: bool                     # nothing flagged: save straight away
+    can_override: bool           # flagged, but an organizer may assign anyway with a reason
+    issues: list[AssignmentIssue] = []
+    suggestions: list[AssignmentSuggestion] = []
