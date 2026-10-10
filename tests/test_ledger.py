@@ -212,3 +212,71 @@ async def test_profit_loss_api(client, db, world, auth):
         "/api/v1/ledger/events/00000000-0000-0000-0000-000000000000/profit-loss", headers=auth(world.treasurer)
     )
     assert missing.status_code == 404
+
+
+async def test_unified_financial_reconciliation(client, db, world, auth):
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+
+    common = dict(club_id=world.club.id, created_by=world.treasurer.id)
+
+    # 1. Received membership dues
+    await ledger_service.record_income(db, source_module="membership", amount=Decimal("1500.00"), **common)
+    # 2. Verified ticket revenue
+    await ledger_service.record_income(
+        db, source_module="event_ticket", amount=Decimal("2000.00"), event_id=world.bake_sale.id, **common
+    )
+    # 3. Verified merchandise revenue
+    await ledger_service.record_income(db, source_module="merchandise", amount=Decimal("1200.00"), **common)
+    # 4. Pending payment (MUST NOT count towards total income or balance)
+    await ledger_service.record_income(
+        db, source_module="merchandise", amount=Decimal("500.00"), payment_status="pending", **common
+    )
+    # 5. Paid direct expense
+    await ledger_service.record_expense(
+        db, entry_type="expense", source_module="manual", amount=Decimal("800.00"),
+        category="printing", payment_status="paid", event_id=world.bake_sale.id, **common
+    )
+    # 6. Approved-but-unpaid reimbursement (MUST NOT reduce balance, counted as pending obligation)
+    await ledger_service.record_expense(
+        db, entry_type="reimbursement", source_module="expense_claim", amount=Decimal("600.00"),
+        category="supplies", payment_status="approved", event_id=world.bake_sale.id, **common
+    )
+    # 7. Refund
+    await ledger_service.record_refund(db, source_module="merchandise", amount=Decimal("200.00"), **common)
+    await db.commit()
+
+    # Reconcile summary
+    summary = await ledger_service.get_summary(db, world.club.id)
+    assert summary.total_income == Decimal("4700.00")
+    assert summary.income_by_source["membership"] == Decimal("1500.00")
+    assert summary.income_by_source["event_ticket"] == Decimal("2000.00")
+    assert summary.income_by_source["merchandise"] == Decimal("1200.00")
+    assert summary.total_expenses == Decimal("800.00")
+    assert summary.total_reimbursements_paid == Decimal("0.00")
+    assert summary.pending_reimbursements == Decimal("600.00")
+    assert summary.total_refunds == Decimal("200.00")
+    # Net balance = credits (4700) - debits (800 expenses + 200 refunds) = 3700.00
+    assert summary.current_balance == Decimal("3700.00")
+
+    # Reconcile event profit/loss
+    pnl = await ledger_service.get_event_profit_loss(db, world.club.id, world.bake_sale.id, "Bake Sale")
+    assert pnl.ticket_income == Decimal("2000.00")
+    assert pnl.approved_expenses == Decimal("1400.00")  # 800 paid + 600 approved
+    assert pnl.outstanding_reimbursements == Decimal("600.00")
+    assert pnl.net_profit_loss == Decimal("600.00")
+    assert pnl.result == "profit"
+
+    # Verify HTML dashboard rendering
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.treasurer.id))
+    resp = await client.get("/treasurer")
+    assert resp.status_code == 200
+    assert "Membership dues" in resp.text
+    assert "Ticket revenue" in resp.text
+    assert "Merchandise revenue" in resp.text
+    assert "₹3,700.00" in resp.text
+    assert "₹4,700.00" in resp.text
+    assert "₹1,500.00" in resp.text
+    assert "₹2,000.00" in resp.text
+    assert "₹1,200.00" in resp.text
+

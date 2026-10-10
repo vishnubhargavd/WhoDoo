@@ -13,6 +13,10 @@
           {{ entry.source_module | label }}
           {% if entry.source_module == "expense_claim" and entry.reference_id %}
             <br><a href="/expenses/{{ entry.reference_id }}">View claim</a>
+          {% elif entry.source_module == "merchandise" and entry.reference_id %}
+            <br><a href="/orders/{{ entry.reference_id }}">View order</a>
+          {% elif entry.event_id %}
+            <br><a href="/treasurer/ledger?event_id={{ entry.event_id }}">View event finances</a>
           {% endif %}
         </td>
         <td>{{ entry.description or "—" }}</td>

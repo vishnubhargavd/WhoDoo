@@ -14,6 +14,18 @@
     <div class="value">{{ summary.total_income | inr }}</div>
   </div>
   <div class="card stat">
+    <div class="label">Membership dues</div>
+    <div class="value">{{ (summary.income_by_source.get('membership', 0)) | inr }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Ticket revenue</div>
+    <div class="value">{{ (summary.income_by_source.get('event_ticket', 0)) | inr }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Merchandise revenue</div>
+    <div class="value">{{ (summary.income_by_source.get('merchandise', 0)) | inr }}</div>
+  </div>
+  <div class="card stat">
     <div class="label">Total expenses</div>
     <div class="value">{{ summary.total_expenses | inr }}</div>
   </div>
