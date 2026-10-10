@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}My Profile · WhoDoo{% endblock %}
+{% block content %}
+<h1>Member Profile</h1>
+<p class="sub">Manage your permitted member details, contact info, and payment profile.</p>
+
+{% if profile.active_reminders %}
+<div class="card" style="border-left: 4px solid var(--accent, #f59e0b); background: rgba(245, 158, 11, 0.08); margin-bottom: 2rem;">
+  <h2 style="font-size: 1.25rem; margin-top: 0;">Membership Renewal Reminders</h2>
+  <ul style="list-style: none; padding: 0; margin: 0.5rem 0;">
+    {% for reminder in profile.active_reminders %}
+    <li style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 0; border-bottom: 1px solid rgba(255,255,255,0.1);">
+      <div>
+        <strong>{{ reminder.plan_name }}</strong> · <span class="badge warning">{{ reminder.reminder_stage }}</span>
+        <p style="margin: 4px 0 0 0;">{{ reminder.message }}</p>
+      </div>
+      <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <a class="button small primary" href="{{ reminder.action_url }}">Renew Now</a>
+        <button class="button small secondary" onclick="dismissReminder('{{ reminder.id }}')">Dismiss</button>
+      </div>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card" style="margin-bottom: 2rem;">
+  <h2>Account & Role Information</h2>
+  <p class="muted">Identity, roles, and membership status are server-governed and cannot be self-edited.</p>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-top: 1rem;">
+    <div>
+      <label>Email (Auth Identity)</label>
+      <input type="text" value="{{ profile.email }}" disabled readonly style="opacity: 0.7;" />
+    </div>
+    <div>
+      <label>Club Role</label>
+      <input type="text" value="{{ profile.role | capitalize }}" disabled readonly style="opacity: 0.7;" />
+    </div>
+    <div>
+      <label>Membership Status</label>
+      <input type="text" value="{{ 'Active Member' if profile.is_active_member else 'Inactive' }}" disabled readonly style="opacity: 0.7;" />
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom: 2rem;">
+  <h2>Personal & Academic Details</h2>
+  <form id="profile-form" onsubmit="saveProfile(event)">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
+      <div>
+        <label for="full_name">Display Name *</label>
+        <input type="text" id="full_name" name="full_name" value="{{ profile.full_name }}" required maxlength="150" />
+      </div>
+      <div>
+        <label for="phone">Phone Number</label>
+        <input type="text" id="phone" name="phone" value="{{ profile.phone or '' }}" placeholder="+91 98765 43210" maxlength="20" />
+      </div>
+      <div>
+        <label for="department">Department / Course</label>
+        <input type="text" id="department" name="department" value="{{ profile.department or '' }}" placeholder="e.g. Computer Science" maxlength="100" />
+      </div>
+      <div>
+        <label for="academic_year">Academic Year</label>
+        <input type="text" id="academic_year" name="academic_year" value="{{ profile.academic_year or '' }}" placeholder="e.g. 3rd Year / Batch 2026" maxlength="50" />
+      </div>
+    </div>
+    <div style="margin-top: 1rem;">
+      <label for="profile_image_url">Profile Image URL</label>
+      <input type="url" id="profile_image_url" name="profile_image_url" value="{{ profile.profile_image_url or '' }}" placeholder="https://example.com/avatar.jpg" />
+    </div>
+    <div style="margin-top: 1.5rem;">
+      <button type="submit" class="button primary">Save Profile Details</button>
+      <span id="save-status" style="margin-left: 1rem;"></span>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Secure UPI Profile</h2>
+  <p class="muted">Used for reimbursements and club payouts. Validated and masked for security.</p>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-top: 1rem;">
+    <div>
+      <label>Registered UPI ID</label>
+      <input type="text" value="{{ profile.upi_id_masked or 'Not configured' }}" disabled readonly style="opacity: 0.8;" />
+    </div>
+    <div>
+      <label for="new_upi">Update UPI ID (VPA Handle)</label>
+      <input type="text" id="new_upi" placeholder="yourname@okaxis" />
+    </div>
+  </div>
+  <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
+    <button type="button" class="button secondary" onclick="saveUPI()">Save UPI ID</button>
+    {% if profile.upi_id_masked %}
+    <button type="button" class="button danger" onclick="removeUPI()">Remove UPI ID</button>
+    {% endif %}
+    <span id="upi-status" style="align-self: center;"></span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveProfile(event) {
+  event.preventDefault();
+  const status = document.getElementById("save-status");
+  status.textContent = "Saving...";
+  const body = {
+    full_name: document.getElementById("full_name").value,
+    phone: document.getElementById("phone").value,
+    department: document.getElementById("department").value,
+    academic_year: document.getElementById("academic_year").value,
+    profile_image_url: document.getElementById("profile_image_url").value
+  };
+  try {
+    const res = await fetch("/api/v1/membercore/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (res.ok) {
+      status.textContent = "Saved successfully!";
+      status.style.color = "var(--ok, #10b981)";
+      setTimeout(() => location.reload(), 800);
+    } else {
+      const err = await res.json();
+      status.textContent = err.error?.message || "Failed to save.";
+      status.style.color = "var(--danger, #ef4444)";
+    }
+  } catch (e) {
+    status.textContent = "Network error.";
+    status.style.color = "var(--danger, #ef4444)";
+  }
+}
+
+async function saveUPI() {
+  const upiId = document.getElementById("new_upi").value.trim();
+  const status = document.getElementById("upi-status");
+  if (!upiId) return;
+  status.textContent = "Updating...";
+  try {
+    const res = await fetch("/api/v1/upi/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ upi_id: upiId })
+    });
+    if (res.ok) {
+      status.textContent = "UPI ID updated!";
+      status.style.color = "var(--ok, #10b981)";
+      setTimeout(() => location.reload(), 800);
+    } else {
+      const err = await res.json();
+      status.textContent = err.error?.message || "Invalid UPI ID.";
+      status.style.color = "var(--danger, #ef4444)";
+    }
+  } catch (e) {
+    status.textContent = "Network error.";
+  }
+}
+
+async function removeUPI() {
+  if (!confirm("Are you sure you want to remove your UPI ID?")) return;
+  const res = await fetch("/api/v1/upi/profile", { method: "DELETE" });
+  if (res.ok) location.reload();
+}
+
+async function dismissReminder(id) {
+  const res = await fetch("/api/v1/membercore/reminders/" + id + "/dismiss", { method: "POST" });
+  if (res.ok) location.reload();
+}
+</script>
+{% endblock %}

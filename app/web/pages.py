@@ -30,6 +30,7 @@ from app.services import (
     ledger_service,
     merch_service,
     payment_service,
+    profile_service,
     shared_directory,
     task_service,
 )
@@ -134,6 +135,15 @@ async def home(request: Request, user: CurrentUser = Depends(get_current_user), 
     """A signed-in person's own page: live figures from every module they can use."""
     club = await shared_directory.get_club(db, user.club_id)
     return render(request, "home.html", user, tiles=await _home_tiles(db, user), club_name=club.name if club else None)
+
+
+@router.get("/profile")
+async def profile_page(
+    request: Request, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    """Member profile page: permitted details, UPI, and renewal reminders."""
+    profile = await profile_service.get_member_profile(db, user.id)
+    return render(request, "profile.html", user, profile=profile)
 
 
 @router.get("/whoami")
