@@ -144,6 +144,34 @@ provider configuration must be reported separately from local fixtures and mocke
     - Verified with focused tests in `tests/test_legacyvault.py` (1 passed) and `tests/test_demo_readiness.py` (3 passed).
     - Commit: `95a39e8`.
 
+## Final Enhancements Batch 1: Razorpay/UPI, Member Profiles & Renewals, Event Budgets & Registrations
+- **Task 1 — Razorpay Test Mode + Secure UPI Profiles**:
+  - Implemented migration `070_upi_and_razorpay.sql` with tables `user_payment_profiles`, `razorpay_orders`, `reimbursement_payouts`.
+  - UPI Profiles: Add, update, delete, view masked handle (`us****@okaxis`), preferred reimbursement method. Enforces server-side user ownership; validates syntax without claiming validation equals bank verification.
+  - Razorpay Test Mode: backend order creation in paise, SHA256 HMAC signature verification (`razorpay_signature`), idempotent verification callbacks, TrustLedger integration for dues, tickets, and merch orders. Rejects live Razorpay keys in test mode.
+  - Reimbursements via UPI: preserves two-approver rule for claims >= ₹1,000, payout initiation in pending/manual mode when RazorpayX is unconfigured, zero false paid status without provider settlement.
+  - Tests verified: `tests/test_razorpay_upi.py` (4 passed in 4.93s).
+  - Commit: `ee4640d`.
+
+- **Task 2 — Member Profiles + Automatic Renewal Notifications**:
+  - Implemented migration `071_member_profiles_and_renewals.sql` extending `users` with `phone`, `department`, `academic_year`, `profile_image_url`, and table `member_renewal_reminders`.
+  - Profile Editing: Authenticated members can edit display name, phone, department/course, academic year, profile image, and UPI handle. Strict schema validation (`extra="forbid"`) rejects tampering with role, authentication identity, or privileges.
+  - Automated Renewal Reminders: Reads genuine MemberCore expiry dates. Generates in-app reminders at 30d, 14d, 7d, 1d, and on expiry. Enforces idempotency via `UNIQUE (membership_id, reminder_stage)`. Auto-dismisses obsolete reminders upon renewal.
+  - Web UI: Added `/profile` page and Account menu navigation link.
+  - Tests verified: `tests/test_member_profiles.py` (4 passed in 3.54s).
+  - Commit: `0b0dc3b`.
+
+- **Task 3 — Event Budgets + Registrations + Low-Seat Warnings**:
+  - Implemented migration `072_event_budgets_and_registrations.sql` adding `budget_inr`, `registration_capacity`, `registration_opens_at`, `registration_closes_at` to `events`.
+  - Organizer Form: added inputs for budget in INR, registration capacity, opens at, and deadline (`app/templates/events/form.html`).
+  - Event Budget Dashboard: Authoritative event-specific financial summary displaying allocated budget, approved expenses, paid expenses, pending expenses, remaining budget, and over-budget warning.
+  - Calculated Registrations & Availability: Real calculations from `ticket_bookings` and `ticket_categories` (confirmed, held, remaining).
+  - Low-Seat Warnings: Configurable threshold alerting at <= 10% remaining or <= 5 seats. Shows "LOW SEATS" warning.
+  - Capacity & Deadline Gates: Shows "SOLD OUT" and rejects new direct bookings beyond capacity in backend under row locks. Shows "REGISTRATION CLOSED" when deadline passes.
+  - Tests verified: `tests/test_event_budget_registrations.py` (5 passed in 8.38s).
+  - Frontend verified: `npm run typecheck --prefix web` passed with 0 errors.
+  - Commit: `dfc1c29`.
+
 ## Implementation Checklist
 
 ### Mandatory Problem Statement Requirements
