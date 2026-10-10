@@ -5,6 +5,7 @@
 auth module lands, only this file and app/services/shared_directory.py change.
 """
 
+import logging
 import uuid
 from collections.abc import AsyncIterator, Callable
 
@@ -12,11 +13,14 @@ from fastapi import Depends, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import supabase_auth
 from app.core.config import get_settings
 from app.core.errors import AppError, forbidden
 from app.core.security import decode_user_id
 from app.db.database import SessionLocal
 from app.services import shared_directory
+
+logger = logging.getLogger("whodoo.auth")
 
 ROLE_PRESIDENT = "president"
 ROLE_TREASURER = "treasurer"
@@ -49,21 +53,49 @@ async def get_db() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def _extract_token(request: Request) -> str | None:
+def _bearer_token(request: Request) -> str | None:
     header = request.headers.get("Authorization", "")
     if header.lower().startswith("bearer "):
-        return header[7:].strip()
-    return request.cookies.get(get_settings().session_cookie)
+        return header[7:].strip() or None
+    return None
+
+
+def _extract_token(request: Request) -> str | None:
+    """Local mode: the bearer header, else the demo session cookie."""
+    return _bearer_token(request) or request.cookies.get(get_settings().session_cookie)
+
+
+async def _supabase_user(request: Request, db: AsyncSession):
+    """Supabase mode: a verified ES256 token, then users.auth_user_id. Bearer header only.
+
+    Club, role and membership come from the users row, never from the token.
+    """
+    token = _bearer_token(request)
+    if not token:
+        raise AppError(401, "not_authenticated", "Please sign in")
+    identity = await supabase_auth.verify_access_token(token)
+    try:
+        user = await shared_directory.get_user_by_auth_user_id(db, identity.auth_user_id)
+    except shared_directory.AuthIdentityUnavailable as exc:
+        logger.error("Supabase sign-in refused, identity mapping unavailable: %s", exc)
+        raise AppError(503, "auth_unavailable", "Sign-in is temporarily unavailable, please try again") from None
+    if user is None:
+        logger.info("Supabase sign-in refused: no application user linked to this auth user")
+        raise AppError(401, "account_not_linked", "This sign-in is not linked to a WhoDoo account")
+    return user
 
 
 async def get_current_user(request: Request, db: AsyncSession = Depends(get_db)) -> CurrentUser:
-    """Resolve the caller from a `Authorization: Bearer <jwt>` header or the session cookie."""
-    token = _extract_token(request)
-    if not token:
-        raise AppError(401, "not_authenticated", "Please sign in")
-    user = await shared_directory.get_user(db, decode_user_id(token))
-    if user is None:
-        raise AppError(401, "unknown_user", "This account no longer exists")
+    """Resolve the caller. AUTH_MODE decides how; the token never does."""
+    if get_settings().auth_mode == "supabase":
+        user = await _supabase_user(request, db)
+    else:
+        token = _extract_token(request)
+        if not token:
+            raise AppError(401, "not_authenticated", "Please sign in")
+        user = await shared_directory.get_user(db, decode_user_id(token))
+        if user is None:
+            raise AppError(401, "unknown_user", "This account no longer exists")
     return CurrentUser(
         id=user.id,
         club_id=user.club_id,
