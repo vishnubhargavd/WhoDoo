@@ -7,7 +7,7 @@ WhoDoo is an extracurricular club management system for college students. This i
 | **TrustLedger** | One immutable ledger for all income, expenses, reimbursements and refunds. Treasurer dashboard, filters, event profit and loss. |
 | **Snap-to-Reimburse** | Upload a receipt, OCR reads vendor, amount and date, the volunteer confirms, approvers approve, the treasurer pays. |
 | **MerchFlow** | Merchandise catalogue with member pricing, orders, and stock that cannot be oversold. |
-| **Payments** | Razorpay-compatible order → verify → webhook flow. Runs on a **Mock Payment (Razorpay-compatible)** provider until Razorpay keys are set. |
+| **Payments** | Stripe Checkout (test mode): checkout session → server-side verification → webhook. Falls back to a **Mock Payment (Stripe-compatible)** provider when no Stripe test key is set. |
 
 ## Quick start
 
@@ -45,8 +45,11 @@ Everyday commands (run `make help` for the full list):
 | `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_STORAGE_BUCKET` | — / — / `receipts` | Receipt storage. Blank means receipts go to local disk under `UPLOAD_DIR`. |
 | `UPLOAD_DIR` | `uploads` | Local receipt folder. |
 | `EXPENSE_AUTO_APPROVAL_LIMIT` | `1000` | Claims at or above this need two approvals. |
-| `PAYMENT_PROVIDER` | `auto` | `auto` uses Razorpay when both keys are set, otherwise the mock. `mock` forces the mock. |
-| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | — | Razorpay test-mode keys. |
+| `PAYMENT_PROVIDER` | `auto` | `stripe` or `auto` use Stripe when `STRIPE_SECRET_KEY` is a test key, otherwise the mock. `mock` forces the mock. |
+| `STRIPE_SECRET_KEY` | — | Stripe **test-mode** secret key (`sk_test_…`). Server only. Live keys are refused. |
+| `STRIPE_PUBLISHABLE_KEY` | — | Stored for completeness. Hosted Checkout by redirect does not need it in the browser. |
+| `STRIPE_WEBHOOK_SECRET` | — | `whsec_…` from `make stripe-listen`. Optional: without it webhooks are rejected and checkout still completes. |
+| `APP_BASE_URL` | `http://127.0.0.1:8000` | Where Stripe sends the buyer back to. Must match the address you open the app on. |
 
 ### Moving to Supabase
 
@@ -66,12 +69,13 @@ Migrations live in `migrations/` and are applied in name order by `python -m scr
 | `001_ledger.sql` | `ledger_entries`, `approval_logs`, `audit_logs` |
 | `002_expenses.sql` | `expense_claims`, `receipt_uploads` |
 | `003_merch.sql` | `merch_products`, `product_variants`, `merch_orders`, `order_items` |
+| `004_stripe_payments.sql` | Renames the provider ids on `merch_orders` to `stripe_checkout_session_id` and `stripe_payment_intent_id`, adds `currency`, creates `payment_events` |
 
 The tables follow the brief. Additions, and why:
 
 | Addition | Reason |
 |---|---|
-| `ledger_entries.idempotency_key` (unique) | A retried webhook or double click cannot post an entry twice, while a refund or adjustment for the same reference still can. Payment-driven keys are `<razorpay_payment_id>:<entry_type>`. |
+| `ledger_entries.idempotency_key` (unique) | A retried webhook or double click cannot post an entry twice, while a refund or adjustment for the same reference still can. Payment-driven keys are `<stripe_payment_intent_id>:<entry_type>`. |
 | Trigger `ledger_entries_immutable` | The database itself rejects deletes, and any update other than `payment_status`. Corrections are new `adjustment` entries. |
 | `ledger_entries.source_module` also allows `fundraiser` | The summary reports fundraiser income. |
 | `expense_claims.approval_stage`, `first_approved_by` | Track which of the two approvals a claim is waiting for, and stop one person giving both. |
@@ -137,10 +141,10 @@ How totals are worked out:
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/payments/razorpay/create-order` | Opens a provider order for your unpaid merch order. The server sets the amount. |
-| POST | `/payments/razorpay/verify` | Verifies the checkout signature, then fulfils the order. |
-| POST | `/payments/razorpay/webhook` | `payment.captured`, `order.paid`, `payment.failed`. Authenticated by `X-Razorpay-Signature`. |
-| POST | `/payments/mock/simulate` | Mock provider only. Stands in for the Razorpay Checkout popup. |
+| POST | `/payments/stripe/create-checkout-session` | Body: `merch_order_id`. Opens a Checkout Session for your unpaid order; the server sets the amount. Returns `checkout_url`. |
+| POST | `/payments/stripe/verify` | Body: `session_id`. Retrieves the session from Stripe, checks it is paid, yours and for the right amount, then fulfils the order. |
+| POST | `/payments/stripe/webhook` | `checkout.session.completed`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`. Authenticated by `Stripe-Signature`. |
+| POST | `/payments/mock/simulate` | Mock provider only. Stands in for the buyer on Stripe's checkout page (`success` or `failure`). |
 
 ## Approval workflow
 
@@ -194,23 +198,48 @@ If Tesseract is missing, the file is a PDF, or the image cannot be read, the upl
 ## Payment flow
 
 ```
-POST /merch/orders                      order created, stock checked, nothing reserved
-POST /payments/razorpay/create-order    provider order opened for the server's amount
-   Razorpay Checkout (or mock/simulate) returns order id, payment id, signature
-POST /payments/razorpay/verify          signature checked with the key secret
+POST /merch/orders                               order created (payment pending), stock checked, nothing reserved
+POST /payments/stripe/create-checkout-session    Checkout Session opened for the server's amount, in paise
+   buyer pays on Stripe's hosted page            (or /payments/mock/simulate with the mock provider)
+GET  /orders/{id}?session_id=…                   Stripe's success redirect; the page calls the same check as:
+POST /payments/stripe/verify                     session retrieved from Stripe with the secret key
    └─ one transaction: order → paid, stock reduced, merchandise income posted to the ledger
+POST /payments/stripe/webhook                    the same settlement, if the buyer never comes back
 ```
 
-- **Stock** is reduced by `UPDATE … WHERE stock_quantity >= quantity`. If two buyers pay for the last item, one succeeds and the other is refunded and gets `409 out_of_stock`.
-- **A bad signature** marks the order failed and cancelled; stock is untouched.
-- **Retries are safe:** verifying again, or a webhook arriving after verify, changes nothing.
-- **Cancelling a paid order** restores stock and posts a `refund` entry; the original income entry is left alone.
+### Stripe Test Mode setup
 
-### Mock Payment (Razorpay-compatible)
+1. In the Stripe Dashboard, switch to **Test mode** → **Developers → API keys**.
+2. Put the keys in `.env` (never in code, never in Git; `.env` is ignored):
+   ```env
+   PAYMENT_PROVIDER=stripe
+   STRIPE_SECRET_KEY=sk_test_…
+   STRIPE_PUBLISHABLE_KEY=pk_test_…
+   APP_BASE_URL=http://127.0.0.1:8000
+   ```
+3. `make payments` prints which provider is active. `make run`, then open the app at the same address as `APP_BASE_URL`.
+4. Buy something and pay on Stripe's page with the test card **4242 4242 4242 4242**, any future expiry, any CVC, any postal code.
+5. Optional, for webhooks: `brew install stripe/stripe-cli/stripe`, `stripe login`, then `make stripe-listen`. Copy the `whsec_…` it prints into `STRIPE_WEBHOOK_SECRET` and restart.
 
-With no Razorpay keys, `MockPaymentProvider` is used. It issues `order_mock_…` and `pay_mock_…` ids and signs them with the same HMAC-SHA256 scheme as Razorpay, so the verify, webhook and ledger code is identical. The checkout page is labelled as mock and offers a success and a failure button. **No real money moves.**
+If a secret key has ever been pasted into a chat, a commit or a screenshot, roll it in the Dashboard before using it.
 
-To switch to Razorpay Test Mode, set the three `RAZORPAY_*` variables and restart. No code changes.
+### Idempotency and stock safety
+
+- **Nothing is trusted from the browser.** The amount is the order's own total; the paid status and amount are read from Stripe with the secret key. `merch_order_id` in the session metadata is the link back to the order, and it must match.
+- **Stock** is reduced by `UPDATE … WHERE stock_quantity >= quantity`, in the same transaction that marks the order paid and writes the ledger entry.
+- **One ledger entry per payment.** The income entry's unique `idempotency_key` is `<payment_intent_id>:income`, and a refund's is `<payment_intent_id>:refund`.
+- **Repeats are safe.** The success redirect, a page refresh, another call to verify, and the webhook all end in the same settlement on a row-locked order; once it is paid they change nothing.
+- **Webhook deliveries are recorded** in `payment_events`, whose `provider_event_id` is unique. A repeated delivery is acknowledged with `200` and skipped.
+- **Webhooks are a second path, not the only one.** With no `STRIPE_WEBHOOK_SECRET`, every webhook is rejected with `400` and the purchase still completes through the redirect.
+- **Paid but sold out.** If the last item went to someone else between ordering and paying, the order is cancelled, the PaymentIntent is refunded in full through Stripe, the ledger shows the income and the matching refund, and the buyer gets `409 insufficient_stock`.
+- **A declined card** marks the payment `failed` and leaves the order open, because Stripe lets the buyer try another card.
+- **Cancelling a paid order** restores stock, refunds through Stripe and posts a `refund` entry; the original income entry is left alone.
+
+### Mock Payment (Stripe-compatible)
+
+With `PAYMENT_PROVIDER=mock`, or without a usable `sk_test_` key, `MockPaymentProvider` is used. It issues `cs_mock_…` sessions and `pi_mock_…` payment ids and verifies webhooks with Stripe's own signature check, so the verify, webhook and ledger code is identical. The checkout page is labelled as mock and offers a success button and a declined-card button. **No real money moves.** If Stripe rejects the configured key, the app logs the error and switches to the mock until it is restarted.
+
+To switch between them, change `PAYMENT_PROVIDER` (and the key) in `.env` and restart. No code changes.
 
 ## Pages
 
@@ -220,7 +249,7 @@ To switch to Razorpay Test Mode, set the three `RAZORPAY_*` variables and restar
 | `/treasurer/ledger` | Ledger with filters and manual entry |
 | `/expenses`, `/expenses/new`, `/expenses/{id}` | My claims, submit with OCR, claim detail |
 | `/expenses/approvals` | Approval queue and claims waiting for payment |
-| `/store`, `/store/{product_id}`, `/checkout/{order_id}`, `/orders` | Store, product, payment, my orders |
+| `/store`, `/store/{product_id}`, `/checkout/{order_id}`, `/orders`, `/orders/{order_id}` | Store, product, payment, my orders, order confirmation |
 | `/admin/merch`, `/admin/merch/orders` | Products, stock, order management |
 | `/` | Landing page, for everyone (`/welcome` redirects here) |
 | `/home` | A signed-in person's home, with live figures |
@@ -264,8 +293,8 @@ After seeding, the balance is ₹15,140.00 and the Hoodie in M has 10 in stock.
 3. Switch user to **Sneha Iyer** (event lead) → **Approvals** → **Approve**. ₹850 is under the limit, so the claim is approved.
 4. Switch to **Rohan Mehta** (treasurer) → **Approvals** → **Mark as paid**.
 5. **Dashboard**: balance is now ₹14,290.00, and the reimbursement is in the ledger.
-6. Switch to **Ishaan Gupta** (member) → **Store** → **Club Hoodie** → size M → **Continue to payment** → **Pay ₹799.00 (mock success)**.
-7. The product page shows 9 left.
+6. Switch to **Ishaan Gupta** (member) → **Store** → **Club Hoodie** → size M → **Buy now** → **Pay ₹799.00 with Stripe**. On Stripe's page use card **4242 4242 4242 4242**. (With the mock provider the button is **Pay ₹799.00 (mock success)**.)
+7. You land on the order confirmation, marked paid. Refresh it: nothing changes. The product page shows 9 left.
 8. As the treasurer, the **Ledger** shows the merchandise income entry for that order.
 9. **Dashboard**: balance ₹15,089.00, with Bake Sale in the event profit and loss table.
 
@@ -286,7 +315,7 @@ await ledger_service.record_income(
     db, club_id=club_id, source_module="event_ticket", amount=Decimal("200"),
     created_by=buyer_id, payer_id=buyer_id, event_id=event_id,
     reference_id=ticket.id, reference_type="ticket",
-    idempotency_key=f"{razorpay_payment_id}:income",
+    idempotency_key=f"{payment_intent_id}:income",
 )
 ```
 
@@ -304,7 +333,7 @@ await ledger_service.record_income(
 ## Known limitations
 
 - **Sign-in is a demo stand-in.** `/dev/login` lets anyone act as any user. It exists only while `DEMO_AUTH=1`.
-- **Payments are mocked** until Razorpay keys are set. The Razorpay provider is written against the SDK but has not been run against Razorpay's servers.
+- **Payments are mocked** until a Stripe test key is set. Automated tests stub Stripe's network calls; see the note at the end of this list for what has been run against Stripe itself.
 - **Supabase is untested.** Database and Storage were developed against local Postgres and local disk; the Supabase paths are config switches that have not been exercised.
 - **Locally stored receipts are served without a sign-in check** from `/uploads`, under unguessable names. On Supabase they would be in a public bucket; signed URLs would be the next step.
 - **PDF receipts are stored but not read by OCR.** The fields must be typed in.
@@ -312,7 +341,9 @@ await ledger_service.record_income(
 - **The store page orders one product variant at a time.** The API (`POST /merch/orders`) and every order page handle several items per order; there is no cart in the review UI.
 - **An officer's own large claim needs a third person.** With one treasurer and one president, a ₹1,000+ claim submitted by either of them can only be approved if it is linked to an event whose lead gives the first approval. Otherwise the first approval is refused with `no_final_approver`.
 - **Claims approved before the two-person rule are not rewritten.** To list any large claim that reached approval with a single approver: `SELECT id, title, amount, status FROM expense_claims WHERE status IN ('approved','paid') AND first_approved_by IS NULL AND amount >= 1000;`
-- **Refunds call the provider before the database commit.** If the commit then failed, a refund could be issued without being recorded.
+- **Refunds call the provider before the database commit.** If the commit then failed, a refund could be issued without being recorded. The next verification or webhook would record it; Stripe's idempotency key stops a second refund.
+- **Partial refunds made in the Stripe Dashboard are not recorded automatically.** Full refunds are.
+- **Mock checkout sessions live in memory** and are forgotten on restart; the order simply gets a new session.
 - **Stock is not reserved at order time,** so a buyer can reach payment for an item that sells out first. They are refunded automatically.
 - **No pagination on claims and orders lists,** and no CSRF tokens on the review pages (the session cookie is `SameSite=Lax`).
-- **`app/models/payment.py` from the planned layout does not exist.** Payments store their ids on `merch_orders` and their history in `audit_logs`.
+- **`app/models/payment.py` from the planned layout does not exist.** Payments store their ids on `merch_orders`, webhook deliveries in `payment_events` and their history in `audit_logs`.

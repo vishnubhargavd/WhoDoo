@@ -7,7 +7,7 @@ PORT    ?= 8000
 PG_BIN  ?= $(shell brew --prefix postgresql@16 2>/dev/null)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install env db-start db-stop db-create migrate seed seed-finance seed-events run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend receipts psql clean
+.PHONY: help setup install env db-start db-stop db-create migrate seed seed-finance seed-events run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend payments stripe-listen receipts psql clean
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -86,6 +86,15 @@ test-frontend: install ## Run only the landing, sign-in, home and navigation tes
 
 test-pages: install ## Run only the HTML page tests
 	$(PY) -m pytest -q tests/test_pages.py
+
+# --- Payments -----------------------------------------------------------------------
+
+payments: install ## Show which payment provider is active (Stripe test mode or mock)
+	@$(PY) -c "from app.services import payment_service as p; print('Payment provider:', p.get_provider().name)"
+
+stripe-listen: ## Forward Stripe test webhooks to the local server (needs the Stripe CLI)
+	@command -v stripe >/dev/null || (echo "Install the Stripe CLI first: brew install stripe/stripe-cli/stripe"; exit 1)
+	stripe listen --forward-to http://127.0.0.1:$(PORT)/api/v1/payments/stripe/webhook
 
 # --- Housekeeping -------------------------------------------------------------------
 
