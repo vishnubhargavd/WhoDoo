@@ -67,6 +67,32 @@ provider configuration must be reported separately from local fixtures and mocke
   - PDF & Email Tickets (`app/services/ticket_pdf_service.py`, `app/services/email_service.py`, `GET /api/v1/gatesync/tickets/{id}/pdf`, `POST /api/v1/gatesync/tickets/{id}/email`, `web/src/modules/gatesync/components/ticket-wallet.tsx`).
   - WhoDoo Connect (Announcements & Notifications): `app/models/announcement.py`, `app/services/announcement_service.py`, `app/api/v1/announcements.py`, `app/templates/announcements.html`, `web/src/app/announcements/page.tsx`, and announcement banner on Homepage.
 
+## Checkpoint: 2026-10-11 02:12 IST — Batch 2 Completed
+- Task 1: MerchFlow Inventory Manager + Stock-Aware Cart
+  - Created migration `051_inventory_manager.sql` & SQLAlchemy model `ClubInventoryManager`.
+  - Exactly 1 designated active inventory manager per club; assigned/reassigned by leadership (president/treasurer) with audit logs in `AuditLog`.
+  - Fully compatible with `users.role` check constraint (no invalid role added to enum).
+  - Implemented `require_merch_manager` granting inventory manager, treasurer, and president rights to create/edit products, upload images, manage size variants, and fulfill orders, while strictly denying regular members (403).
+  - Concurrency safety: atomic `WHERE stock_quantity >= quantity` prevents negative stock or overselling; idempotency prevents double deductions.
+  - Tests verified: `tests/test_merch.py` (34 passed in 58.2s).
+- Task 2: Snap-to-Reimburse Receipt OCR + Two-Person Approval
+  - Receipt uploads safely inspected with 8 MB limit and type validation (PNG, JPEG, WebP, PDF).
+  - Honest fallback when OCR is missing or uninstalled (no fabricated OCR numbers).
+  - Claims >= ₹1,000 strictly enforce two distinct authorized approvers, excluding claimant.
+  - Cross-club isolation (foreign event or receipt rejected with 404).
+  - Idempotent TrustLedger posting prevents duplicate reimbursements. Rejected claims cannot be paid.
+  - Tests verified: `tests/test_expenses.py` (16 passed, 1 skipped [Tesseract binary optional] in 24.3s).
+- Task 3: TrustLedger Unified Financial Dashboard
+  - Authoritative accounting across all 5 streams: membership dues, ticket sales, merch income, expenses, and net club balance.
+  - Pending payments and approved-but-unpaid reimbursements are separated and never counted as realized revenue or paid expenses.
+  - Event-by-event profit/loss reconciles with club-level financials.
+  - Enhanced `app/templates/treasurer_dashboard.html` with explicit income stream stat cards and `_ledger_table.html` with deep links to orders, claims, and event records.
+  - Tests verified: `tests/test_ledger.py` (11 passed in 10.2s), `tests/test_pages.py` (6 passed, 1 skipped in 8.2s).
+- Frontend Verification:
+  - TypeScript: 0 errors (`npm run typecheck`).
+  - Unit tests: 158 passed in 6.8s (`npm run test`).
+
+
 ## Implementation Checklist
 
 ### Mandatory Problem Statement Requirements
