@@ -25,10 +25,11 @@ async def test_landing_page_for_signed_out_visitors(client):
     assert 'href="/login"' in html and "Enter WhoDoo" in html
     # Tools that exist in this app link to them (through sign-in); the rest say so honestly.
     assert 'href="/login?next=/store"' in html and 'href="/login?next=/events"' in html
-    assert html.count("Live — open it") == 6 and html.count("Coming soon") == 6
-    for name in ("MemberCore", "FairSeat", "GateSync", "CertiDoo"):
+    assert html.count("Live — open it") == 7 and html.count("Coming soon") == 5
+    for name in ("MemberCore", "FairSeat", "GateSync"):
         card = html[html.index(name) - 600: html.index(name) + 400]
         assert "<article" in card and "Coming soon" in card
+
     old = await client.get("/welcome")
     assert old.status_code == 308 and old.headers["location"] == "/"
 
@@ -112,7 +113,8 @@ def test_navigation_is_role_aware():
         return {section["title"]: [link["label"] for link in section["links"]] for section in nav["sections"]}
 
     assert links("member") == {
-        "Events": ["Events", "My tasks"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"]}
+        "Events": ["Events", "My tasks"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"],
+        "Connect": ["Announcements"]}
     assert links("event_lead")["Expenses"] == ["My expenses", "Submit expense", "Approvals"]
     assert "Finance" not in links("event_lead")
     assert links("treasurer")["Finance"] == ["Dashboard", "Ledger"]
@@ -137,8 +139,9 @@ async def test_shell_marks_the_current_section_and_hides_what_you_cannot_use(cli
     assert re.search(r'<a href="/expenses" class="active"\s+aria-current="true">Expenses</a>', page)
     assert re.search(r'<a href="/expenses/new" class="active" aria-current="page">Submit expense</a>', page)
     assert 'href="/treasurer"' not in page and 'href="/admin/merch"' not in page and "Approvals" not in page
-    for soon in ("Memberships", "Tickets", "Check-in", "Announcements", "Certificates"):
+    for soon in ("Memberships", "Tickets", "Check-in", "Certificates"):
         assert f'aria-disabled="true">{soon}' in page             # other modules: shown, not linked
+
 
     _sign_in(client, world.treasurer)
     page = (await client.get("/treasurer")).text

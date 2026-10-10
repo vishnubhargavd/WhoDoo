@@ -5,7 +5,7 @@ unique keys and the conditional stock update."""
 import os
 import tempfile
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", "postgresql+asyncpg://localhost/whodoo_test")
@@ -46,11 +46,16 @@ async def _schema():
     conn = await asyncpg.connect(asyncpg_dsn(url))
     try:
         for path in sorted((MIGRATIONS_DIR / "pending").glob("*.sql")):
+            name = f"pending/{path.name}"
+            already = await conn.fetchval("SELECT 1 FROM schema_migrations WHERE name = $1", name)
+            if already:
+                continue
             async with conn.transaction():
                 await conn.execute(path.read_text())
-                await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", f"pending/{path.name}")
+                await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", name)
     finally:
         await conn.close()
+
 
 
 @pytest.fixture(scope="session")
@@ -98,9 +103,14 @@ async def world(db):
         outsider=person("Omar Outsider", "member", member=False),
     )
     await db.flush()
-    bake_sale = Event(id=uuid.uuid4(), club_id=club.id, name="Bake Sale", event_date=date(2026, 10, 3), lead_id=people.lead.id, status="published")
-    fest = Event(id=uuid.uuid4(), club_id=club.id, name="Tech Fest", event_date=date(2026, 9, 12), lead_id=people.lead2.id, status="published")
+    bake_sale = Event(id=uuid.uuid4(), club_id=club.id, name="Bake Sale", event_date=date(2026, 10, 3), lead_id=people.lead.id, status="draft")
+    fest_starts = datetime(2026, 9, 12, 9, 0, tzinfo=timezone.utc)
+    fest_ends = datetime(2026, 9, 12, 18, 0, tzinfo=timezone.utc)
+    fest = Event(id=uuid.uuid4(), club_id=club.id, name="Tech Fest", event_date=date(2026, 9, 12),
+                 starts_at=fest_starts, ends_at=fest_ends, venue="Auditorium", lead_id=people.lead2.id, status="published")
     db.add_all([bake_sale, fest])
+
+
     await db.commit()
     return SimpleNamespace(club=club, bake_sale=bake_sale, fest=fest, **vars(people))
 

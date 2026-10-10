@@ -654,7 +654,9 @@ def test_sale_state_boundaries():
 
 EVENT_KEYS = {"id", "club_id", "name", "description", "starts_at", "ends_at", "event_date", "venue", "status",
               "lead_id", "lead_name", "created_by", "created_by_name", "created_at", "updated_at", "can_manage",
-              "allowed_statuses", "progress", "crew"}
+              "allowed_statuses", "progress", "crew",
+              "budget_inr", "registration_capacity", "registration_opens_at", "registration_closes_at"}
+
 
 
 async def test_response_contracts(client, world, auth):

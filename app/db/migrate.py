@@ -7,8 +7,8 @@ import asyncpg
 MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "migrations"
 
 
-async def run_migrations(dsn: str, *, reset: bool = False) -> list[str]:
-    """Apply pending migrations and return their names. `reset` drops the public schema first."""
+async def run_migrations(dsn: str, *, reset: bool = False, include_pending: bool = True) -> list[str]:
+    """Apply migrations and return their names. `reset` drops the public schema first."""
     conn = await asyncpg.connect(dsn)
     try:
         if reset:
@@ -23,12 +23,22 @@ async def run_migrations(dsn: str, *, reset: bool = False) -> list[str]:
         done = {row["name"] for row in await conn.fetch("SELECT name FROM schema_migrations")}
         applied = []
         for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
-            if path.name in done:
+            if path.name in done or f"pending/{path.name}" in done:
                 continue
             async with conn.transaction():
                 await conn.execute(path.read_text())
                 await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", path.name)
             applied.append(path.name)
+        if include_pending and (MIGRATIONS_DIR / "pending").is_dir():
+            for path in sorted((MIGRATIONS_DIR / "pending").glob("*.sql")):
+                name = f"pending/{path.name}"
+                if name in done or path.name in done:
+                    continue
+                async with conn.transaction():
+                    await conn.execute(path.read_text())
+                    await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", name)
+                applied.append(name)
         return applied
     finally:
         await conn.close()
+

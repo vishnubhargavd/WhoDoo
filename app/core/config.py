@@ -73,12 +73,12 @@ class Settings(BaseSettings):
     # Where the payment provider sends a ticket buyer back to. Blank = this API's own return route.
     fairseat_return_url: str = ""
 
-    # Administrator-configured approved campus venues
     approved_venues: str = (
         "Main Hall, Auditorium, Open Air Theatre, Student Activity Center, "
         "Seminar Hall A, Seminar Hall B, Seminar Room 1, Campus Grounds, "
-        "Campus Quad, Sports Complex, Amphitheatre, Hall"
+        "Campus Quad, Sports Complex, Amphitheatre, Hall, Room 1, Elsewhere"
     )
+
 
     def get_approved_venues(self) -> list[str]:
         return [v.strip() for v in self.approved_venues.split(",") if v.strip()]
