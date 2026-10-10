@@ -39,8 +39,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.dependencies import CurrentUser
 from app.core.errors import bad_request, conflict, forbidden, not_found
-from app.models.fairseat import EventTicket, TicketBooking, TicketBookingCommand, TicketCategory, TicketQuote
-from app.models.shared import Event
+from app.models.fairseat import EventTicket, TicketBooking, TicketBookingCommand, TicketCategory, TicketQuote, TicketWaitlistEntry
+from app.models.shared import Event, User
 from app.models.tickets import EventTicketSettings
 from app.schemas.fairseat import (
     BookingOut,
@@ -50,6 +50,8 @@ from app.schemas.fairseat import (
     QuoteRequest,
     ReservationRequest,
     TicketOut,
+    WaitlistJoinRequest,
+    WaitlistOut,
 )
 from app.schemas.tickets import TicketCategoryIn, TicketConfigIn
 from app.services import (
@@ -533,6 +535,7 @@ async def cancel_booking(
             session, club_id=user.club_id, actor_id=user.id, action="fairseat.booking_released",
             entity_type="ticket_booking", entity_id=booking.id, details={"from": before, "to": booking.status},
         )
+        await promote_next_waitlisted(session, event.id, found.ticket_category_id, now)
     return (await _present(session, [booking], now))[0]
 
 
@@ -554,6 +557,8 @@ async def expire_holds(session: AsyncSession, now: datetime | None = None, batch
     for event_id in sorted(by_event):
         await ticket_locks.lock_for_event(session, event_id, by_event[event_id])
         expired += await _mark_expired(session, now, B.event_id == event_id)
+        for cat_id in sorted(by_event[event_id]):
+            await promote_next_waitlisted(session, event_id, cat_id, now)
     return expired
 
 
@@ -614,3 +619,170 @@ async def release_bookings_for_event(
         await _release(session, booking, event, now, reason="event_cancelled", by_organiser=True)
     await session.flush()
     return [booking.id for booking in paid]
+
+
+# --- Waitlist --------------------------------------------------------------------------
+
+
+async def join_waitlist(
+    session: AsyncSession, user: CurrentUser, data: WaitlistJoinRequest, now: datetime | None = None
+) -> WaitlistOut:
+    """Join the waitlist for a sold-out category."""
+    now = now or utcnow()
+    event, settings, category = await _event_and_category(
+        session, user, data.event_id, data.ticket_category_id, lock=True)
+    if event.status != "published":
+        raise conflict("event_not_published", "Waitlist is only open for published events.")
+    if event.starts_at is not None and now >= event.starts_at:
+        raise conflict("event_started", "This event has already started.")
+
+    existing = await session.scalar(
+        select(TicketWaitlistEntry).where(
+            TicketWaitlistEntry.event_id == event.id,
+            TicketWaitlistEntry.ticket_category_id == category.id,
+            TicketWaitlistEntry.user_id == user.id,
+            TicketWaitlistEntry.status.in_(("waiting", "offered")),
+        )
+    )
+    if existing is not None:
+        return WaitlistOut.model_validate(existing)
+
+    max_pos = await session.scalar(
+        select(func.coalesce(func.max(TicketWaitlistEntry.position), 0)).where(
+            TicketWaitlistEntry.ticket_category_id == category.id
+        )
+    ) or 0
+
+    entry = TicketWaitlistEntry(
+        id=uuid.uuid4(),
+        event_id=event.id,
+        ticket_category_id=category.id,
+        user_id=user.id,
+        quantity=data.quantity,
+        status="waiting",
+        position=max_pos + 1,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(entry)
+    await session.flush()
+    audit_service.record(
+        session, club_id=event.club_id, actor_id=user.id, action="fairseat.waitlist_joined",
+        entity_type="ticket_waitlist_entry", entity_id=entry.id,
+        details={"category_id": str(category.id), "quantity": data.quantity, "position": entry.position},
+    )
+    return WaitlistOut.model_validate(entry)
+
+
+async def list_my_waitlist(session: AsyncSession, user: CurrentUser) -> list[WaitlistOut]:
+    entries = list(await session.scalars(
+        select(TicketWaitlistEntry).where(TicketWaitlistEntry.user_id == user.id)
+        .order_by(TicketWaitlistEntry.created_at.desc(), TicketWaitlistEntry.id)
+    ))
+    return [WaitlistOut.model_validate(e) for e in entries]
+
+
+async def cancel_waitlist(
+    session: AsyncSession, user: CurrentUser, entry_id: uuid.UUID, now: datetime | None = None
+) -> WaitlistOut:
+    now = now or utcnow()
+    entry = await session.get(TicketWaitlistEntry, entry_id)
+    if entry is None or entry.user_id != user.id:
+        raise not_found("Waitlist entry")
+    if entry.status in ("waiting", "offered"):
+        entry.status = "cancelled"
+        entry.updated_at = now
+        await session.flush()
+        audit_service.record(
+            session, club_id=user.club_id, actor_id=user.id, action="fairseat.waitlist_cancelled",
+            entity_type="ticket_waitlist_entry", entity_id=entry.id,
+        )
+    return WaitlistOut.model_validate(entry)
+
+
+async def promote_next_waitlisted(
+    session: AsyncSession, event_id: uuid.UUID, category_id: uuid.UUID, now: datetime | None = None
+) -> BookingOut | None:
+    """Promote the oldest eligible waitlisted entry in FIFO order under the event/category locks."""
+    now = now or utcnow()
+    settings = get_settings()
+    event, ticket_settings, categories = await ticket_locks.lock_for_event(session, event_id, [category_id])
+    if event is None or category_id not in categories:
+        return None
+    category = categories[category_id]
+    event_categories = list(await session.scalars(select(TicketCategory.id).where(TicketCategory.event_id == event.id)))
+    counts = await occupied_seats(session, event_categories, now)
+    event_cap = ticket_settings.capacity if ticket_settings else category.capacity
+    available = min(category.capacity - counts[category.id], event_cap - sum(counts.values()))
+    if available <= 0:
+        return None
+
+    entry = await session.scalar(
+        select(TicketWaitlistEntry)
+        .where(
+            TicketWaitlistEntry.event_id == event.id,
+            TicketWaitlistEntry.ticket_category_id == category.id,
+            TicketWaitlistEntry.status == "waiting",
+            TicketWaitlistEntry.quantity <= available,
+        )
+        .order_by(TicketWaitlistEntry.position.asc(), TicketWaitlistEntry.created_at.asc())
+        .with_for_update()
+        .limit(1)
+    )
+    if entry is None:
+        return None
+
+    user = await session.get(User, entry.user_id)
+    if user is None:
+        return None
+
+    # Calculate price using fairseat_pricing (honors member eligibility & discount rules)
+    quote = await fairseat_pricing.issue_quote(
+        session, user_id=user.id, event=event, category=category, quantity=entry.quantity, now=now
+    )
+    free = quote.total_price_paise == 0
+
+    booking = TicketBooking(
+        id=uuid.uuid4(),
+        event_id=event.id,
+        ticket_category_id=category.id,
+        purchaser_user_id=user.id,
+        quote_id=quote.id,
+        quantity=entry.quantity,
+        unit_price_paise=quote.unit_price_paise,
+        total_price_paise=quote.total_price_paise,
+        currency=settings.currency,
+        member_eligible=quote.member_eligible,
+        applied_discount_bps=quote.applied_discount_bps,
+        discount_applied=quote.discount_applied,
+        discount_reason=quote.discount_reason,
+        discount_explanation=quote.discount_explanation,
+        status="confirmed" if free else "pending_payment",
+        payment_status="not_required" if free else "pending",
+        hold_expires_at=None if free else now + timedelta(seconds=settings.fairseat_hold_seconds),
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(booking)
+    await session.flush()
+
+    if free:
+        session.add_all(_new_tickets(booking))
+        entry.status = "converted"
+    else:
+        entry.status = "offered"
+        entry.offered_at = now
+        entry.offer_expires_at = booking.hold_expires_at
+
+    entry.promoted_booking_id = booking.id
+    entry.updated_at = now
+    await session.flush()
+
+    audit_service.record(
+        session, club_id=event.club_id, actor_id=user.id, action="fairseat.waitlist_promoted",
+        entity_type="ticket_booking", entity_id=booking.id,
+        details={"waitlist_entry_id": str(entry.id), "category_id": str(category.id),
+                 "quantity": booking.quantity, "status": booking.status, "free": free},
+    )
+    return (await _present(session, [booking], now))[0]
+

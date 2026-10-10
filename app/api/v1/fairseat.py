@@ -23,8 +23,10 @@ from app.schemas.fairseat import (
     QuoteOut,
     QuoteRequest,
     ReservationRequest,
+    WaitlistJoinRequest,
+    WaitlistOut,
 )
-from app.services import fairseat_payments, fairseat_service
+from app.services import event_service, fairseat_payments, fairseat_service
 
 
 def require_fairseat() -> None:
@@ -125,3 +127,54 @@ async def cancel_booking(
         await fairseat_payments.process_refund(db, booking_id)
         booking = await fairseat_service.get_booking(db, user, booking_id)
     return booking
+
+
+# --- Waitlist --------------------------------------------------------------------------
+
+
+@router.post("/ticket-waitlist", response_model=WaitlistOut, status_code=201)
+async def join_waitlist(
+    body: WaitlistJoinRequest,
+    user: CurrentUser = Depends(get_purchaser),
+    db: AsyncSession = Depends(get_db),
+) -> WaitlistOut:
+    """Join the waitlist for an event and category."""
+    entry = await fairseat_service.join_waitlist(db, user, body)
+    await db.commit()
+    return entry
+
+
+@router.get("/ticket-waitlist", response_model=list[WaitlistOut])
+async def my_waitlist(
+    user: CurrentUser = Depends(get_purchaser),
+    db: AsyncSession = Depends(get_db),
+) -> list[WaitlistOut]:
+    """List caller's waitlist entries."""
+    return await fairseat_service.list_my_waitlist(db, user)
+
+
+@router.delete("/ticket-waitlist/{entry_id}", response_model=WaitlistOut)
+async def cancel_waitlist(
+    entry_id: uuid.UUID,
+    user: CurrentUser = Depends(get_purchaser),
+    db: AsyncSession = Depends(get_db),
+) -> WaitlistOut:
+    """Leave the waitlist."""
+    entry = await fairseat_service.cancel_waitlist(db, user, entry_id)
+    await db.commit()
+    return entry
+
+
+@router.post("/events/{event_id}/ticket-waitlist/promote", response_model=BookingOut | None)
+async def promote_waitlist(
+    event_id: uuid.UUID,
+    category_id: uuid.UUID,
+    user: CurrentUser = Depends(get_purchaser),
+    db: AsyncSession = Depends(get_db),
+) -> BookingOut | None:
+    """Organizer promotion: promote next eligible waitlist attendee for a category."""
+    event = await event_service.get_managed_event(db, user, event_id)
+    booking = await fairseat_service.promote_next_waitlisted(db, event.id, category_id)
+    await db.commit()
+    return booking
+

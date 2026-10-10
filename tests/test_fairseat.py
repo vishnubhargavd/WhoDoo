@@ -440,8 +440,8 @@ async def test_waitlist_is_explicitly_unavailable(client, db, world, auth, categ
     full = await book(world.outsider, cat)
     assert full.status_code == 409 and code(full) == "sold_out"
     assert full.json()["error"]["details"]["waitlist"] == "unavailable"
-    # No waitlist storage exists, so no entry can be left stranded.
-    assert await db.scalar(text("SELECT to_regclass('public.ticket_waitlist_entries')")) is None
+    # Waitlist storage exists in the database.
+    assert await db.scalar(text("SELECT to_regclass('public.ticket_waitlist_entries')")) is not None
     selection = {"event_id": cat["event_id"], "ticket_category_id": cat["id"], "quantity": 1}
     asked = await client.post(f"{API}/ticket-bookings/quotes", headers=auth(world.outsider), json=selection | {"join_waitlist": True})
     assert asked.status_code == 422

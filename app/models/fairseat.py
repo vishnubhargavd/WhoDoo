@@ -152,3 +152,26 @@ class EventTicket(Base):
     checked_in_at: Mapped[datetime | None] = _moment(nullable=True)
     revoked_at: Mapped[datetime | None] = _moment(nullable=True)
     created_at: Mapped[datetime] = created_at_col()
+
+
+WAITLIST_STATUSES = ("waiting", "offered", "converted", "expired", "cancelled")
+
+
+class TicketWaitlistEntry(Base):
+    """Waitlist entry for sold-out events and categories."""
+
+    __tablename__ = "ticket_waitlist_entries"
+
+    id: Mapped[uuid.UUID] = _id()
+    event_id: Mapped[uuid.UUID] = _ref("events.id")
+    ticket_category_id: Mapped[uuid.UUID] = _ref("ticket_categories.id")
+    user_id: Mapped[uuid.UUID] = _ref("users.id")
+    quantity: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(Text, default="waiting")
+    position: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    offered_at: Mapped[datetime | None] = _moment(nullable=True)
+    offer_expires_at: Mapped[datetime | None] = _moment(nullable=True)
+    promoted_booking_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("ticket_bookings.id"), nullable=True)
+    created_at: Mapped[datetime] = created_at_col()
+    updated_at: Mapped[datetime] = updated_at_col()
+

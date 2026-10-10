@@ -187,3 +187,27 @@ class TicketMockSimulate(_Strict):
 class TicketWebhookAck(BaseModel):
     status: Literal["processed", "ignored", "duplicate"]
     detail: str | None = None
+
+
+# --- Waitlist --------------------------------------------------------------------------
+
+
+class WaitlistJoinRequest(_Strict):
+    event_id: uuid.UUID
+    ticket_category_id: uuid.UUID
+    quantity: int = Field(default=1, gt=0, le=10, strict=True)
+
+
+class WaitlistOut(ORMModel):
+    id: uuid.UUID
+    event_id: uuid.UUID
+    ticket_category_id: uuid.UUID
+    user_id: uuid.UUID
+    quantity: int
+    status: Literal["waiting", "offered", "converted", "expired", "cancelled"]
+    position: int | None = None
+    offered_at: datetime | None = None
+    offer_expires_at: datetime | None = None
+    promoted_booking_id: uuid.UUID | None = None
+    created_at: datetime
+

@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fairseat import TicketBooking, TicketCategory
+from app.models.fairseat import TicketBooking, TicketCategory, TicketWaitlistEntry
 from app.models.shared import Event
 from app.models.tickets import EventTicketSettings
 
@@ -68,6 +68,16 @@ async def lock_booking(db: AsyncSession, booking_id: uuid.UUID) -> TicketBooking
         .execution_options(populate_existing=True)
     )
     return await db.scalar(stmt)
+
+
+async def lock_waitlist_entry(db: AsyncSession, entry_id: uuid.UUID) -> TicketWaitlistEntry | None:
+    """Lock waitlist entry under event/category locks."""
+    stmt = (
+        select(TicketWaitlistEntry).where(TicketWaitlistEntry.id == entry_id).with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return await db.scalar(stmt)
+
 
 
 async def lock_for_event(
