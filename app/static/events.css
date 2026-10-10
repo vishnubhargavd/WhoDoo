@@ -48,3 +48,11 @@ details.add-task[open] summary { margin-bottom: 12px; }
   .event-row { grid-template-columns: 1fr; }
   .score .value { font-size: 48px; }
 }
+
+/* FairSeat ticket settings */
+.badge.open { background: var(--green-bg); color: var(--green); }
+.badge.not_open, .badge.unpublished { background: var(--amber-bg); color: var(--amber); }
+.badge.off, .badge.closed, .badge.not_configured { background: var(--gray-bg); color: var(--gray); }
+.ticket-warnings { margin-top: 0; padding-left: 32px; }
+.ticket-categories input[type=text], .ticket-categories input[type=number] { width: 100%; min-width: 90px; }
+.ticket-categories td { vertical-align: middle; }

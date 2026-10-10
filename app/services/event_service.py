@@ -7,6 +7,8 @@ Authorization rules (checked here, never trusted from the request):
 - Only presidents change who leads an event.
 - Drafts are visible to presidents, the event lead and the creator; everyone in the
   club sees published, cancelled and completed events.
+- Events with ticketing: status and schedule changes first pass ticket_service's
+  lifecycle guards (no draft, cancellation or rescheduling once tickets may be booked).
 """
 
 import uuid
@@ -31,7 +33,7 @@ from app.schemas.events import (
     TaskProgress,
     check_window,
 )
-from app.services import audit_service, autopilot, shared_directory, syncsphere
+from app.services import audit_service, autopilot, shared_directory, syncsphere, ticket_service
 from app.services.syncsphere import IST
 
 TRANSITIONS = {
@@ -246,6 +248,7 @@ async def update_event(
             raise bad_request("invalid_schedule", str(exc)) from exc
         if "starts_at" in changes and starts_at != event.starts_at and starts_at and starts_at <= now:
             raise bad_request("start_in_past", "The event must start in the future")
+        await ticket_service.guard_schedule_change(db, event, starts_at, ends_at, now)
 
     before = {key: str(getattr(event, key)) for key in changes}
     for key, value in changes.items():
@@ -282,6 +285,7 @@ async def change_status(
             raise bad_request("start_in_past", "An event that has already started cannot be published")
     if status == "completed" and not (event.starts_at and event.starts_at <= now):
         raise bad_request("not_started", "An event can only be completed after it starts")
+    await ticket_service.guard_status_change(db, event, status, now)
 
     previous, event.status = event.status, status
     await db.flush()
