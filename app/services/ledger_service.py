@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import AppError, bad_request, conflict  # noqa: F401  (AppError re-exported for callers)
+from app.models.fairseat import TicketBooking
 from app.models.ledger import EXPENSE_CATEGORIES, LedgerEntry
 from app.schemas.ledger import EventProfitLoss, LedgerFilters, LedgerSummary, MonthlyTrendPoint
 from app.services import audit_service
@@ -440,10 +441,27 @@ async def get_event_profit_loss(
                 _total(E.payment_status == "approved", E.entry_type == "reimbursement").label("reimbursements_owed"),
                 _total(paid, E.entry_type == "adjustment", E.direction == "credit").label("adjust_up"),
                 _total(paid, E.entry_type == "adjustment", E.direction == "debit").label("adjust_down"),
-                func.count().filter(and_(income, ticket)).label("tickets_sold"),
+                # Income entries that are not FairSeat bookings count as one ticket each, as before.
+                func.count().filter(
+                    and_(income, ticket, E.reference_type.is_distinct_from("ticket_booking"))
+                ).label("other_ticket_entries"),
+                func.count().filter(and_(income, ticket)).label("ticket_entries"),
             ).where(E.club_id == club_id, E.event_id == event_id)
         )
     ).one()
+
+    # A FairSeat booking is one payment and one ledger entry for several seats, so tickets are
+    # counted from the bookings themselves: seats that are paid for and still confirmed.
+    tickets_sold = row.ticket_entries
+    if get_settings().fairseat_enabled:
+        seats = await session.scalar(
+            select(func.coalesce(func.sum(TicketBooking.quantity), 0)).where(
+                TicketBooking.event_id == event_id,
+                TicketBooking.status == "confirmed",
+                TicketBooking.payment_status == "paid",
+            )
+        )
+        tickets_sold = row.other_ticket_entries + int(seats)
 
     net = row.tickets + row.merch + row.other + row.adjust_up - row.refunds - row.costs - row.adjust_down
     return EventProfitLoss(
@@ -458,7 +476,7 @@ async def get_event_profit_loss(
         outstanding_reimbursements=row.reimbursements_owed,
         net_profit_loss=net,
         result="profit" if net > 0 else "loss" if net < 0 else "break_even",
-        tickets_sold=row.tickets_sold,
+        tickets_sold=tickets_sold,
         attendees=None,
     )
 
