@@ -7,7 +7,7 @@ PORT    ?= 8000
 PG_BIN  ?= $(shell brew --prefix postgresql@16 2>/dev/null)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install env db-start db-stop db-create migrate migrate-pending seed seed-finance seed-events seed-modules modules seed-all run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend test-fairseat test-modules test-web test-all fairseat-vectors payments stripe-listen receipts psql clean
+.PHONY: help setup install env db-start db-stop db-create migrate migrate-pending seed seed-finance seed-events seed-modules modules seed-all run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend test-fairseat test-modules test-registrations purge-registrations email-test test-web test-all fairseat-vectors payments stripe-listen receipts psql clean
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -106,6 +106,15 @@ test-fairseat: install ## Run only the FairSeat tests: booking, event settings, 
 
 test-modules: install ## Run only the MemberCore, GateSync, Connect, CertiDoo and LegacyVault tests (uses whodoo_test)
 	$(PY) -m pytest -q tests/test_modules.py
+
+test-registrations: install ## Run only the public registration tests: venues, limit, payment, QR, email, retention
+	$(PY) -m pytest -q tests/test_registrations.py
+
+email-test: install ## Send one sample ticket email to check the mail settings in .env: make email-test TO=you@example.com
+	$(PY) -m scripts.send_test_email $(TO)
+
+purge-registrations: install ## Delete participant details of events that ended more than 60 days ago (the app also does this daily)
+	$(PY) -m scripts.purge_registrations
 
 fairseat-vectors: ## Regenerate ticket price test vectors from MemberCore's TypeScript calculator (needs node 22.6+)
 	node --experimental-strip-types --no-warnings scripts/make_ticket_discount_vectors.mjs

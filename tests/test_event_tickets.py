@@ -660,7 +660,8 @@ EVENT_KEYS = {"id", "club_id", "name", "description", "starts_at", "ends_at", "e
 async def test_response_contracts(client, world, auth):
     event_id, current = await selling(client, auth, world)
     event = (await client.get(f"{API}/{event_id}", headers=auth(world.lead))).json()
-    assert set(event) == EVENT_KEYS  # the Event API is unchanged
+    # The Event API as it was, plus the public-registration fields (migration 012).
+    assert set(event) == EVENT_KEYS | {"venue_id", "registration_mode", "max_participants", "price_paise"}
 
     assert set(current) == {"event_id", "club_id", "configured", "sales_enabled", "capacity", "allocated", "opens_at",
                             "closes_at", "max_per_booking", "sales_activated_at", "sale_state", "locked", "categories",

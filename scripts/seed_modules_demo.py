@@ -54,8 +54,9 @@ async def seed(session) -> None:
 
     now = datetime.now(timezone.utc)
     upcoming = list(await session.scalars(
+        # FairSeat tickets go on events that do not already take public registrations: one or the other.
         select(Event).where(Event.club_id == club.id, Event.status == "published", Event.starts_at > now + timedelta(days=1),
-                            Event.ends_at.isnot(None))
+                            Event.ends_at.isnot(None), Event.registration_mode == "none")
         .order_by(Event.starts_at).limit(2)
     ))
     ticketed = []

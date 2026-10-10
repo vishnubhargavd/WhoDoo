@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from app.core.dependencies import CurrentUser
 from app.db.database import SessionLocal
+from app.models.registration import Venue
 from app.models.shared import Club, Event, User
 from app.schemas.crewpulse import TaskCreate, TaskStatusChange
 from app.schemas.events import EventCreate, EventUpdate
@@ -48,6 +49,10 @@ async def seed(session) -> None:
     p, s, k = acting(president), acting(sneha), acting(karthik)
     events = {e.name: e for e in await session.scalars(select(Event).where(Event.club_id == club.id))}
 
+    # Venues from the college list (migration 012), for the events students can register for.
+    venues = {v.name: v.id for v in await session.scalars(select(Venue))}
+    lawn, mini = venues["Central Lawn"], venues["Mini Auditorium"]
+
     # --- Past events from the finance demo get real times and are completed ----------
     for name, hours in (("Freshers' Night", (18, 22)), ("Tech Fest Workshop", (10, 16))):
         if event := events.get(name):
@@ -61,7 +66,8 @@ async def seed(session) -> None:
     bake_sale = events.get("Bake Sale")
     if bake_sale:
         await event_service.update_event(session, s, bake_sale, EventUpdate(
-            starts_at=ist_at(7, 10), ends_at=ist_at(7, 16), venue="Campus Quad",
+            starts_at=ist_at(7, 10), ends_at=ist_at(7, 16), venue_id=lawn,
+            registration_mode="free", max_participants=300,   # open to every student, no charge
             description="Fundraiser bake sale. Every rupee goes to the spring gala budget."))
         await event_service.change_status(session, s, bake_sale, "published")
         sale_tasks = [
@@ -79,7 +85,8 @@ async def seed(session) -> None:
 
     # --- Spring Gala: the big one, with a blocker ----------------------------------------
     gala = await event_service.create_event(session, p, EventCreate(
-        name="Spring Gala", starts_at=ist_at(12, 18), ends_at=ist_at(12, 22), venue="Main Hall", lead_id=sneha.id,
+        name="Spring Gala", starts_at=ist_at(12, 18), ends_at=ist_at(12, 22), venue_id=mini, lead_id=sneha.id,
+        registration_mode="paid", price_paise=25000, max_participants=250,   # ₹250 a head, paid online
         description="The association's biggest night: dinner, live music and the annual awards."))
     await event_service.change_status(session, p, gala, "published")
     gala_tasks = [
@@ -100,7 +107,7 @@ async def seed(session) -> None:
 
     # --- A draft that clashes with the gala, for SyncSphere ------------------------------
     meetup = await event_service.create_event(session, k, EventCreate(
-        name="Hackathon Prep Meetup", starts_at=ist_at(12, 20), ends_at=ist_at(12, 22), venue="main hall"))
+        name="Hackathon Prep Meetup", starts_at=ist_at(12, 20), ends_at=ist_at(12, 22), venue_id=mini))   # same hall as the gala
     await task_service.create_task(session, k, meetup, TaskCreate(title="Reserve projector", due_at=ist_at(10, 12)))
 
     # --- A quiet, healthy event --------------------------------------------------------

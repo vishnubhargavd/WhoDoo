@@ -21,8 +21,11 @@ async def _gala_with_tasks(client, auth, world) -> str:
 
 
 async def test_pages_need_sign_in(client):
-    response = await client.get("/events")
-    assert response.status_code == 303 and response.headers["location"] == "/dev/login?next=/events"
+    # The events list itself is public (anyone can register); managing events still needs sign-in.
+    public = await client.get("/events")
+    assert public.status_code == 200 and "Upcoming events" in public.text
+    response = await client.get("/events/new")
+    assert response.status_code == 303 and response.headers["location"] == "/dev/login?next=/events/new"
 
 
 async def test_organizer_pages(client, world, auth):
@@ -62,3 +65,29 @@ async def test_volunteer_pages(client, world, auth):
 async def test_empty_states(client, world):
     client.cookies.update(_cookie(world.volunteer))
     assert "No tasks assigned to you" in (await client.get("/my-tasks")).text
+
+
+async def test_a_finished_task_leads_to_a_reimbursement_claim_for_it(client, world, auth):
+    event_id = (await create(client, auth, world.lead)).json()["id"]
+    await client.post(f"{EVENTS}/{event_id}/status", headers=auth(world.lead), json={"status": "published"})
+    task = (await client.post(f"{EVENTS}/{event_id}/tasks", headers=auth(world.lead),
+                              json={"title": "Buy decorations", "assignee_id": str(world.volunteer.id)})).json()
+    client.cookies.update(_cookie(world.volunteer))
+    link = f'href="/expenses/new?task_id={task["id"]}"'
+    before = (await client.get("/my-tasks")).text
+    assert "Mark done" in before and link not in before
+
+    await client.post(f"/api/v1/tasks/{task['id']}/status", headers=auth(world.volunteer), json={"status": "done"})
+    after = (await client.get("/my-tasks")).text
+    assert link in after and "Submit reimbursement form" in after and "Reopen" not in after
+
+    form = (await client.get(f"/expenses/new?task_id={task['id']}")).text
+    assert 'value="Buy decorations"' in form and "For the task: Buy decorations" in form
+    assert f'<option value="{event_id}" selected>' in form
+    # Somebody else's task fills nothing in; the form just opens blank.
+    client.cookies.update(_cookie(world.member))
+    other = await client.get(f"/expenses/new?task_id={task['id']}")
+    assert other.status_code == 200 and "Buy decorations" not in other.text and "selected>" not in other.text
+    # The organiser can still reopen a task from the event page.
+    client.cookies.update(_cookie(world.lead))
+    assert "Reopen" in (await client.get(f"/events/{event_id}")).text

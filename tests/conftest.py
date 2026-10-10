@@ -16,6 +16,9 @@ os.environ["PAYMENT_PROVIDER"] = "mock"
 os.environ["EXPENSE_AUTO_APPROVAL_LIMIT"] = "1000"
 os.environ["SUPABASE_URL"] = ""
 os.environ["FAIRSEAT_ENABLED"] = "1"
+os.environ["REGISTRATION_RATE_LIMIT"] = "0"
+os.environ["SMTP_HOST"] = ""
+os.environ["MAIL_OUTBOX_DIR"] = tempfile.mkdtemp(prefix="whodoo-test-outbox-")
 os.environ["FAIRSEAT_PAYMENTS_ENABLED"] = "1"
 os.environ["UPLOAD_DIR"] = tempfile.mkdtemp(prefix="whodoo-test-uploads-")
 
@@ -51,7 +54,9 @@ async def fairseat_schema(_schema):
 async def db(_schema):
     async with SessionLocal() as session:
         tables = await session.scalars(
-            text("SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename <> 'schema_migrations'")
+            text(# venues is reference data loaded by its migration, like the schema itself.
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+            "AND tablename NOT IN ('schema_migrations', 'venues')")
         )
         await session.execute(text("TRUNCATE " + ", ".join(tables) + " CASCADE"))
         await session.commit()

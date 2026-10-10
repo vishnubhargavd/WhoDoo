@@ -24,7 +24,8 @@ async def test_landing_page_for_signed_out_visitors(client):
     assert html.count('class="slice"') == 9                      # the sliced title animation
     assert 'href="/login"' in html and "Enter WhoDoo" in html
     # Tools that exist in this app link to them (through sign-in); the rest say so honestly.
-    assert 'href="/login?next=/store"' in html and 'href="/login?next=/events"' in html
+    assert 'href="/login?next=/store"' in html and 'href="/login?next=/my-tasks"' in html
+    assert 'href="/events"' in html and "Browse events" in html   # events are public: no sign-in on the way
     # The test database has every module's tables, so all twelve tools are live.
     assert html.count("Live — open it") == 12 and "Coming soon" not in html
     for href in ("/memberships", "/tickets", "/check-in", "/announcements", "/certificates", "/handover"):
@@ -127,7 +128,7 @@ def test_navigation_is_role_aware(monkeypatch):
         return {section["title"]: [link["label"] for link in section["links"]] for section in nav["sections"]}
 
     assert links("member") == {
-        "Events": ["Events", "My tasks"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"]}
+        "Events": ["Events", "My tasks", "Public page"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"]}
     assert links("event_lead")["Expenses"] == ["My expenses", "Submit expense", "Approvals"]
     assert "Finance" not in links("event_lead")
     assert links("treasurer")["Finance"] == ["Dashboard", "Ledger"]

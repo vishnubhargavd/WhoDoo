@@ -1,3 +1,41 @@
+# Public event registration (always on)
+
+Any student can open `/events` without signing in, see upcoming events from every club, and
+register. Signed in, `/events` is the club's own management page as before (the public list is
+at `/explore`).
+
+- **Setting an event up.** On the event form the lead picks free, paid or no online
+  registration, the number of participants, and a venue. Only venues that hold that many
+  people are offered (ten college venues are loaded by `migrations/012_public_events.sql`).
+  An event cannot be published with a venue that is too small or a paid event without a price.
+- **Registering.** Name, college student ID, email and phone. One place per student per event.
+  The limit is enforced under a lock: when every place is taken the answer is "All N places
+  for this event are taken".
+- **Paid events** use the same payment provider as merchandise (Stripe test mode, or the mock).
+  The place is held for 30 minutes while paying. A payment that arrives after the place went to
+  someone else is refunded.
+- **The ticket** is a QR code, shown on a private ticket page and emailed. Each code is an HMAC
+  of the registration's own id, so no two are alike, and the database also refuses a duplicate.
+  It admits once: the door page (`/check-in`) shows the name and student ID, and a second scan
+  says when it was already used.
+- **Email.** Set `SMTP_HOST=smtp.gmail.com`, `SMTP_USER` and `SMTP_PASSWORD` (a Gmail app
+  password) in `.env` to send real emails. Without them, emails are written to `outbox/`.
+- **Retention.** Participant details are deleted 60 days after the event ends
+  (`REGISTRATION_RETENTION_DAYS`), about once a day by the app or with `make purge-registrations`.
+- **Participant or crew, not both.** Someone registered to attend cannot be given tasks for that
+  event, and someone with a task on it cannot register. The "Allocate task to" list offers
+  members and volunteers who are not attending.
+- **Checking email.** `make email-test TO=you@example.com` sends one sample ticket and says why
+  if it could not. The ticket page states whether the email was sent, saved (no mail server) or failed.
+- An event uses public registration or FairSeat ticket categories, never both.
+
+Not built: a waitlist, member prices for guests, cancelling by the participant, refunding
+everyone automatically when an event is cancelled (remove participants one by one to refund).
+
+Tests: `make test-registrations`.
+
+---
+
 # Memberships, Tickets, Check-in, Announcements, Certificates, Handover
 
 Six tools that used to be listed as "coming soon" are built into the FastAPI app.
