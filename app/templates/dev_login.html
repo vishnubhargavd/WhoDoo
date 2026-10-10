@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Demo sign-in · WhoDoo Finance{% endblock %}
+{% block content %}
+<h1>Demo sign-in</h1>
+<p class="sub">Temporary stand-in for the real login. Pick a seeded user to act as.</p>
+<div class="card">
+  {% if users %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Name</th><th>Role</th><th>Member</th><th>Email</th><th></th></tr></thead>
+      <tbody>
+        {% for person in users %}
+        <tr>
+          <td>{{ person.full_name }}</td>
+          <td><span class="badge">{{ person.role | label }}</span></td>
+          <td>{{ "Active" if person.is_active_member else "No" }}</td>
+          <td class="muted">{{ person.email }}</td>
+          <td class="right">
+            <form method="post" action="/dev/login">
+              <input type="hidden" name="user_id" value="{{ person.id }}">
+              <input type="hidden" name="next" value="{{ next }}">
+              <button class="small" type="submit">Sign in</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No users yet. Run <code>python -m scripts.seed_finance_demo</code> first.</p>
+  {% endif %}
+</div>
+{% endblock %}

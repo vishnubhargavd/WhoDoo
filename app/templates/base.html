@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}WhoDoo Finance{% endblock %}</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">WhoDoo Finance</a>
+    <nav>
+      {% if user %}
+        {% if user.role in ("treasurer", "president") %}
+          <a href="/treasurer">Dashboard</a>
+          <a href="/treasurer/ledger">Ledger</a>
+        {% endif %}
+        <a href="/expenses">My expenses</a>
+        <a href="/expenses/new">Submit expense</a>
+        {% if user.role in ("event_lead", "treasurer", "president") %}
+          <a href="/expenses/approvals">Approvals</a>
+        {% endif %}
+        <a href="/store">Store</a>
+        <a href="/orders">My orders</a>
+        {% if user.role in ("treasurer", "president") %}
+          <a href="/admin/merch">Merch admin</a>
+          <a href="/admin/merch/orders">Merch orders</a>
+        {% endif %}
+      {% endif %}
+    </nav>
+    <span class="who">
+      {% if user %}
+        {{ user.full_name }} · {{ user.role | label }}{% if user.is_active_member %} · member{% endif %}
+        {% if demo_auth %} · <a href="/logout">Switch user</a>{% endif %}
+      {% endif %}
+    </span>
+  </header>
+  <main class="container">
+    <div id="flash" class="notice error" hidden></div>
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ status_code }} · WhoDoo Finance{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ status_code }} — {{ code | label }}</h1>
+  <p class="sub">{{ message }}</p>
+  <a class="button secondary" href="/">Back to home</a>
+</div>
+{% endblock %}

@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Ledger · WhoDoo Finance{% endblock %}
+{% block content %}
+<h1>TrustLedger</h1>
+<p class="sub">Every entry is permanent. To correct one, post an adjustment.</p>
+
+{% if filter_error %}<div class="notice error">Filters ignored: {{ filter_error }}</div>{% endif %}
+
+<div class="card">
+  <form method="get" action="/treasurer/ledger" class="stack">
+    <div class="fields">
+      <label>From <input type="date" name="date_from" value="{{ filters.date_from or '' }}"></label>
+      <label>To <input type="date" name="date_to" value="{{ filters.date_to or '' }}"></label>
+      <label>Type
+        <select name="entry_type">
+          <option value="">All</option>
+          {% for value in entry_types %}<option value="{{ value }}" {{ "selected" if filters.entry_type == value }}>{{ value | label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Source
+        <select name="source_module">
+          <option value="">All</option>
+          {% for value in source_modules %}<option value="{{ value }}" {{ "selected" if filters.source_module == value }}>{{ value | label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Status
+        <select name="payment_status">
+          <option value="">All</option>
+          {% for value in payment_statuses %}<option value="{{ value }}" {{ "selected" if filters.payment_status == value }}>{{ value | label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Event
+        <select name="event_id">
+          <option value="">All</option>
+          {% for event in events %}<option value="{{ event.id }}" {{ "selected" if filters.event_id == event.id }}>{{ event.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Category <input type="text" name="category" value="{{ filters.category or '' }}" placeholder="e.g. food"></label>
+      <label>Search <input type="search" name="q" value="{{ filters.q or '' }}" placeholder="Description…"></label>
+    </div>
+    <div class="actions">
+      <button type="submit">Apply filters</button>
+      <a class="button secondary" href="/treasurer/ledger">Clear</a>
+      <span class="muted">{{ total }} {{ "entry" if total == 1 else "entries" }}{% if total > entries | length %}, showing {{ entries | length }}{% endif %}</span>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  {% include "_ledger_table.html" %}
+</div>
+
+<div class="card">
+  <h2>Add a manual entry</h2>
+  <form data-api="POST" action="/api/v1/ledger/manual-entry" class="stack">
+    <div class="fields">
+      <label>Type
+        <select name="entry_type" id="manual-type">
+          <option value="income">Income</option>
+          <option value="expense">Expense</option>
+          <option value="adjustment">Adjustment</option>
+        </select>
+      </label>
+      <label id="manual-direction" hidden>Adjustment direction
+        <select name="direction" disabled>
+          <option value="credit">Credit (adds money)</option>
+          <option value="debit">Debit (removes money)</option>
+        </select>
+      </label>
+      <label>Amount (₹) <input type="number" name="amount" min="0.01" step="0.01" required></label>
+      <label>Source
+        <select name="source_module">
+          <option value="manual">Manual</option>
+          <option value="membership">Membership dues</option>
+          <option value="event_ticket">Event tickets</option>
+          <option value="fundraiser">Fundraiser</option>
+        </select>
+      </label>
+      <label>Category <input type="text" name="category" placeholder="Optional"></label>
+      <label>Event
+        <select name="event_id">
+          <option value="">None</option>
+          {% for event in events %}<option value="{{ event.id }}">{{ event.name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>Description <input type="text" name="description" minlength="3" required placeholder="What is this entry for?"></label>
+    <div class="actions"><button type="submit">Post entry</button></div>
+  </form>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const typeSelect = document.getElementById("manual-type");
+  const directionLabel = document.getElementById("manual-direction");
+  typeSelect.addEventListener("change", () => {
+    const isAdjustment = typeSelect.value === "adjustment";
+    directionLabel.hidden = !isAdjustment;
+    directionLabel.querySelector("select").disabled = !isAdjustment;
+  });
+</script>
+{% endblock %}
