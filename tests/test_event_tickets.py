@@ -529,8 +529,12 @@ async def test_capacity_reduction_with_real_bookings(client, db, world, auth):
     assert (await put(client, auth, world.lead, event_id, sized(6, 2))).status_code == 200
 
 
-async def test_cancelling_releases_unpaid_bookings_and_is_blocked_by_paid_ones(client, db, world, auth):
-    """The cancellation guard, inside the event's own status change."""
+async def test_cancelling_releases_unpaid_bookings_and_is_blocked_by_paid_ones(client, db, world, auth, monkeypatch):
+    """The cancellation guard, inside the event's own status change, with ticket payments
+    switched off (as shipped): there is no way to refund, so a paid booking blocks it."""
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "fairseat_payments_enabled", False)
     event_id, current = await selling(client, auth, world)
     free_config = resend(current, capacity=110)
     free_config["categories"].append({"name": "Free entry", "price_paise": 0, "capacity": 10})
@@ -540,9 +544,9 @@ async def test_cancelling_releases_unpaid_bookings_and_is_blocked_by_paid_ones(c
     confirmed = (await book(client, auth, world.outsider, event_id, free, 2)).json()
     assert (confirmed["status"], len(confirmed["tickets"])) == ("confirmed", 2)
     paid = (await book(client, auth, world.volunteer, event_id, general, 1)).json()
-    # No payment exists on this branch; the paid state is set directly to test the guard.
-    await db.execute(text("UPDATE ticket_bookings SET status = 'confirmed', payment_status = 'paid', hold_expires_at = NULL "
-                          "WHERE id = :id"), {"id": paid["booking_id"]})
+    # With payments off nothing can mark a booking paid; the state is set directly to test the guard.
+    await db.execute(text("UPDATE ticket_bookings SET status = 'confirmed', payment_status = 'paid', hold_expires_at = NULL, "
+                          "stripe_payment_intent_id = 'pi_set_by_test', paid_at = now() WHERE id = :id"), {"id": paid["booking_id"]})
     await db.commit()
 
     blocked = await set_status(client, auth, world.lead, event_id, "cancelled")
@@ -555,8 +559,8 @@ async def test_cancelling_releases_unpaid_bookings_and_is_blocked_by_paid_ones(c
     assert (await client.get(f"{API}/{event_id}/tickets", headers=auth(world.lead))).json()["seats_committed"] == 6
 
     # Without the paid booking, cancelling goes ahead and gives everything back in the same transaction.
-    await db.execute(text("UPDATE ticket_bookings SET status = 'cancelled', payment_status = 'pending' WHERE id = :id"),
-                     {"id": paid["booking_id"]})
+    await db.execute(text("UPDATE ticket_bookings SET status = 'cancelled', payment_status = 'pending', "
+                          "stripe_payment_intent_id = NULL, paid_at = NULL WHERE id = :id"), {"id": paid["booking_id"]})
     await db.commit()
     await set_status(client, auth, world.lead, event_id, "cancelled", expect=200)
     statuses = dict((await db.execute(text("SELECT id::text, status FROM ticket_bookings"))).all())
@@ -569,9 +573,47 @@ async def test_cancelling_releases_unpaid_bookings_and_is_blocked_by_paid_ones(c
     assert refused.status_code == 409 and refused.json()["error"]["code"] == "event_not_bookable"
 
 
-@pytest.mark.skip(reason="PENDING: cancelling an event with paid bookings needs the verified refund workflow (Phase 4)")
-async def test_cancellation_through_refund_workflow():
+async def test_cancellation_through_refund_workflow(client, db, world, auth):
     """Cancel an event with paid bookings via the approved workflow; refunds and ledger entries follow."""
+    from app.models.ledger import LedgerEntry
+    from app.services import payment_service
+
+    provider = payment_service.get_provider()
+    provider.refunds.clear()
+    provider.refund_results.clear()
+    provider.next_refund_status = "succeeded"
+    pay_api = "/api/v1/ticket-payments"
+    event_id, current = await selling(client, auth, world)
+    general = current["categories"][0]["id"]
+
+    paid = []
+    for buyer, quantity in ((world.member, 2), (world.outsider, 1)):
+        booking = (await book(client, auth, buyer, event_id, general, quantity)).json()
+        session = (await client.post(f"{pay_api}/stripe/create-checkout-session", headers=auth(buyer),
+                                     json={"booking_id": booking["booking_id"]})).json()
+        await client.post(f"{pay_api}/mock/simulate", headers=auth(buyer), json={"session_id": session["session_id"]})
+        verified = await client.post(f"{pay_api}/stripe/verify", headers=auth(buyer), json={"session_id": session["session_id"]})
+        assert verified.json()["outcome"] == "confirmed", verified.text
+        paid.append(booking["booking_id"])
+    held = (await book(client, auth, world.volunteer, event_id, general, 1)).json()
+    assert (await client.get(f"{API}/{event_id}/tickets", headers=auth(world.lead))).json()["seats_committed"] == 4
+
+    await set_status(client, auth, world.lead, event_id, "cancelled", expect=200)
+
+    rows = {str(row.id): row for row in (await db.execute(text(
+        "SELECT id, status, payment_status, refund_status, refund_reason FROM ticket_bookings"))).all()}
+    for booking_id in paid:
+        row = rows[booking_id]
+        assert (row.status, row.payment_status, row.refund_status, row.refund_reason) == (
+            "cancelled", "refunded", "succeeded", "event_cancelled")
+    assert (rows[held["booking_id"]].status, rows[held["booking_id"]].refund_status) == ("cancelled", None)
+    assert {status for (status,) in (await db.execute(text("SELECT status FROM event_tickets"))).all()} == {"revoked"}
+    assert len(provider.refunds) == 2                       # one refund per paid booking, no more
+    entries = list(await db.scalars(select(LedgerEntry).where(LedgerEntry.source_module == "event_ticket")))
+    assert sorted(entry.entry_type for entry in entries) == ["income", "income", "refund", "refund"]
+    summary = (await client.get("/api/v1/ledger/summary", headers=auth(world.treasurer))).json()
+    assert summary["current_balance"] == 0.0               # everything paid has gone back
+    assert (await client.get(f"{API}/{event_id}/tickets", headers=auth(world.lead))).json()["seats_committed"] == 0
 
 
 # 14 ----------------------------------------------------------------------------------------

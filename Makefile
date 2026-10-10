@@ -84,8 +84,8 @@ test-merch: install ## Run only the MerchFlow and payment tests
 test-frontend: install ## Run only the landing, sign-in, home and navigation tests
 	$(PY) -m pytest -q tests/test_frontend.py
 
-test-fairseat: install ## Run only the FairSeat tests: booking, event ticket settings, integration, pricing (uses whodoo_test)
-	$(PY) -m pytest -q tests/test_fairseat.py tests/test_fairseat_integration.py tests/test_event_tickets.py tests/test_fairseat_pricing.py
+test-fairseat: install ## Run only the FairSeat tests: booking, event settings, integration, payments, pricing (uses whodoo_test)
+	$(PY) -m pytest -q tests/test_fairseat.py tests/test_fairseat_integration.py tests/test_event_tickets.py tests/test_fairseat_payments.py tests/test_fairseat_pricing.py
 
 fairseat-vectors: ## Regenerate ticket price test vectors from MemberCore's TypeScript calculator (needs node 22.6+)
 	node --experimental-strip-types --no-warnings scripts/make_ticket_discount_vectors.mjs

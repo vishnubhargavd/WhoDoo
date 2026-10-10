@@ -1,6 +1,6 @@
-# WhoDoo — FairSeat ticket booking (Phase 3A)
+# WhoDoo — FairSeat ticket booking and payments
 
-FairSeat lets a club sell a limited number of tickets to an event without ever selling the same seat twice. This phase adapts Ameer's Phase 3A package into the shared FastAPI backend. It holds seats and confirms free tickets. **It takes no payment, writes nothing to the ledger and issues no QR codes.**
+FairSeat lets a club sell a limited number of tickets to an event without ever selling the same seat twice. This phase adapts Ameer's Phase 3A package into the shared FastAPI backend. It holds seats and confirms free tickets. Paying for a held booking, the ledger entries that go with it, and refunds are a second, separately switched part (see "Payments"). **It issues no QR codes; that is GateSync's job.** No real payment provider has been contacted: tests use the mock provider and stub Stripe's network calls.
 
 It is switched off by default and its tables are a pending migration, so a normal `make run` is unaffected.
 
@@ -14,12 +14,14 @@ It is switched off by default and its tables are a pending migration, so a norma
 | Lock order | `app/services/ticket_locks.py` |
 | Seat counting | `app/services/ticket_inventory.py` |
 | Request and response shapes | `app/schemas/fairseat.py` |
-| Tests | `tests/test_fairseat.py`, `tests/test_fairseat_integration.py`, `tests/test_event_tickets.py`, `tests/test_fairseat_pricing.py` |
+| Payment routes | `app/api/v1/fairseat_payments.py` |
+| Payment, late payment and refund rules | `app/services/fairseat_payments.py` |
+| Tests | `tests/test_fairseat.py`, `tests/test_fairseat_integration.py`, `tests/test_event_tickets.py`, `tests/test_fairseat_payments.py`, `tests/test_fairseat_pricing.py` |
 
 ## Running it
 
 ```bash
-make test-fairseat      # 69 tests against the local whodoo_test database
+make test-fairseat      # 96 tests against the local whodoo_test database
 make fairseat-vectors   # regenerate price test vectors from the TypeScript calculator
 ```
 
@@ -58,7 +60,7 @@ Member 2's event-side ticket configuration and this reservation engine are one s
 | Back to draft | Refused: `409 ticket_sales_started` |
 | Reschedule | Refused: `409 ticket_sales_started` |
 | Cancel, only unpaid holds and free bookings | Allowed. Holds are cancelled and free tickets revoked in the same transaction |
-| Cancel, any paid booking | Refused: `409 cancellation_requires_refunds`, nothing released |
+| Cancel, any paid booking | With ticket payments on: allowed. The bookings are cancelled and their tickets revoked in the same transaction, then refunded after it commits. With ticket payments off: refused, `409 cancellation_requires_refunds`, nothing released |
 | Complete | Always allowed |
 
 With no seats booked, all of these are allowed. With `FAIRSEAT_ENABLED=0` the guards do nothing and no ticket table is touched.
@@ -100,8 +102,8 @@ A request cannot name a user, club, role, price or status. Unknown fields are re
 - **Sales window:** the opening instant is included and the closing instant excluded. The event's booking window bounds every category; a category may have a narrower one. Sales cannot close later than the event starts, and nothing can be booked once it has started.
 - **Only published events with a start time and ticket sales switched on can be booked.** Otherwise `409 event_not_bookable` or `409 sales_not_enabled`.
 - **Free tickets** (total of zero) are confirmed at once with `payment_status = not_required` and get one `event_tickets` row per seat, with no credential.
-- **Paid tickets stop at `pending_payment`.** Nothing in this phase can mark a booking paid.
-- **Cancelling** an unpaid hold or a free booking gives the seats back and revokes its ticket rows. A paid booking is refused with `refund_required`.
+- **Paid tickets stay at `pending_payment`** until the payment provider confirms payment (see "Payments").
+- **Cancelling** gives the seats back at once and revokes the ticket rows. A paid booking can be cancelled by its purchaser until the event starts, and is refunded in full. With ticket payments switched off, cancelling a paid booking is refused with `refund_required`.
 - **Waitlist: not offered.** A full category answers `409 sold_out` with `"waitlist": "unavailable"`. There is no waitlist table, so no entry can be left waiting forever.
 
 ## How overselling is prevented
@@ -131,29 +133,101 @@ When the Supabase Auth bridge is approved, only `get_purchaser` in `app/api/v1/f
 
 ## Migration
 
-Two files, both in `migrations/pending/`, applied in this order:
+Three files, all in `migrations/pending/`, applied in this order:
 
 | File | Tables |
 |---|---|
 | `020_fairseat.sql` | `ticket_categories`, `ticket_quotes`, `ticket_bookings`, `ticket_booking_commands`, `event_tickets` |
 | `021_fairseat_event_settings.sql` | `event_ticket_settings`; new columns and constraints on `ticket_categories`; unique index `events (id, club_id)`; the partition triggers |
+| `022_fairseat_payments.sql` | `ticket_payment_events`; payment and refund columns and a stricter state check on `ticket_bookings` |
 
 They sit in `pending/` on purpose. The migration runner reads only `migrations/*.sql`, so `make migrate`, `make seed` and `make run` do not apply them. `tests/conftest.py` applies them to the local `whodoo_test` database only, after the real migrations. To adopt them: `git mv migrations/pending/02*.sql migrations/` and run `make migrate`.
 
-## Connecting payment later (not built)
+## Payments
 
-Payments are now Stripe, not Razorpay. Ticket payment must not reuse the merchandise routes, which are tied to `merch_orders`.
+Needs `FAIRSEAT_PAYMENTS_ENABLED=1` as well as `FAIRSEAT_ENABLED=1`, and uses whichever provider `PAYMENT_PROVIDER` selects (Stripe test mode or the mock). These routes are separate from the merchandise routes and never touch a merchandise order.
 
-- **Session.** A ticket route opens a Stripe Checkout Session for a booking in `pending_payment`, with the amount read from `ticket_bookings.total_price_paise` and `ticket_booking_id` in the metadata. The session should expire no later than the hold.
-- **Verification.** As for merchandise: retrieve the session with the secret key, check it is paid, belongs to the purchaser and matches the booking's amount and currency. The webhook does the same settlement. `payment_events.provider_event_id` already makes repeated deliveries harmless and can be reused.
-- **Confirming.** Under the event and category locks: if the hold is still live, set `confirmed`/`paid` and create the ticket rows. If the hold has expired, recheck capacity; confirm if the seats are still free, otherwise refund in full. This is the same shape as merchandise's paid-but-sold-out path.
-- **Ledger.** One `record_income(source_module="event_ticket", amount=Decimal(total_price_paise) / 100, event_id=…, reference_id=booking.id, reference_type="ticket_booking", idempotency_key=f"{payment_intent_id}:income")`, in the same transaction as the confirmation.
-- **Refunds.** `record_refund` with key `f"{payment_intent_id}:refund"`, the Stripe refund against the PaymentIntent, booking to `cancelled`/`refunded`, tickets revoked.
-- **Several tickets in one booking** are one payment and one ledger entry for the total. "Tickets sold" in finance reports should then count `event_tickets` rows, not ledger entries, which is what it does today.
-- **GateSync.** `event_tickets` is the handoff: one row per seat, `pending_issue`, no credential. GateSync fills `credential_digest` and sets `issued`; check-in is a conditional update to `checked_in`; cancellation sets `revoked`.
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| POST | `/ticket-payments/stripe/create-checkout-session` | Purchaser | Body: `booking_id` only. For a booking in `pending_payment` whose hold has not run out |
+| POST | `/ticket-payments/stripe/verify` | Purchaser | Body: `session_id`. Asks the provider, then confirms or starts a refund |
+| GET | `/ticket-payments/stripe/return?session_id=` | Purchaser | Where the provider sends the buyer back; same as verify |
+| POST | `/ticket-payments/stripe/webhook` | Provider | `Stripe-Signature` checked. Handles `checkout.session.completed`, `payment_intent.succeeded`, `payment_intent.payment_failed`, `refund.updated`, `refund.failed`, `charge.refund.updated`, `charge.refunded` |
+| POST | `/ticket-payments/mock/simulate` | Purchaser | Mock provider only |
+| GET | `/ticket-payments/refunds` | Treasurer, president | Refunds owed, in flight or failed |
+| POST | `/ticket-payments/refunds/{booking_id}/retry` | Treasurer, president | Send a failed or stuck refund again |
+
+Verify and return answer with `outcome`: `confirmed`, `refund_required`, `refund_pending`, `refunded` or `refund_failed`.
+
+**What is trusted.** The amount, currency and owner come from the booking row, which was priced from a server quote. Whether a payment happened comes from the provider: a session the server fetches itself, or a signed webhook. A request body carries only a booking id or a session id.
+
+**Confirming.** A confirmed payment is recorded under the event, settings, category and booking locks. The booking becomes `confirmed`/`paid`, one `event_tickets` row per seat is created, and one ledger entry is posted, all in one transaction. Reporting the same payment again, by any route and any number of times, changes nothing.
+
+**The provider is never called while locks are held.** Each step either talks to the provider or holds locks. A test proves it by trying to lock the same rows from another connection during every provider call.
+
+**Paying late.** A hold lasts 10 minutes, but Stripe's shortest checkout session is 30, so a buyer can pay after the hold has gone. Then, under the locks:
+
+- if the seats are still free in the category and within the event's total, the event is still published, selling and not started, and the purchaser is within their limit, the booking is confirmed;
+- otherwise the payment is recorded, the booking gets no seats (`expired`, or `cancelled` if it had been cancelled), and a full refund is owed, with the reason stored (`seats_reassigned`, `event_not_bookable`, `purchaser_limit`, `booking_cancelled`).
+
+Seats that went to someone else are never taken back.
+
+**Refunds.** A refund is three steps: mark it and commit; ask the provider; record the answer.
+
+| `refund_status` | `payment_status` | Meaning |
+|---|---|---|
+| `required` | `paid` | Owed, not yet sent |
+| `pending` | `paid` | Sent; the provider has not confirmed it |
+| `succeeded` | `refunded` | The provider confirmed it. Only now is the ledger refund entry written |
+| `failed` | `paid` | The provider refused or was unreachable; the reason is stored and a treasurer can retry |
+
+A booking is never shown as refunded before the provider says so. A second attempt after a failure uses a new provider idempotency key; repeating an attempt that is still pending reuses its key, so the money cannot go back twice. A full refund made in the Stripe Dashboard is picked up from the webhook; partial refunds are not recorded.
+
+**A declined card** sets `payment_status = failed` and leaves the hold, so the buyer can try again until it runs out. Nothing is issued.
+
+**A wrong amount or currency** is not accepted: nothing changes and the mismatch is written to the audit log. A second, different payment for one booking is flagged as `duplicate_payment` in the audit log for the treasurer and not applied.
+
+## Ledger
+
+| Event | Entry |
+|---|---|
+| Payment recorded | `record_income`, `source_module="event_ticket"`, `category="ticket_sales"`, `event_id`, `reference_type="ticket_booking"`, `reference_id` = booking id, key `<payment_intent_id>:income` |
+| Refund confirmed by the provider | `record_refund`, same references, key `<payment_intent_id>:refund` |
+
+The amount is `Decimal(total_price_paise) / Decimal(100)`, never a float. Income is posted whenever money arrives, including a late payment that is then refunded, so the ledger agrees with the provider. Entries are never edited or deleted. Merchandise accounting is unchanged.
+
+**Tickets sold.** The event profit and loss used to count ledger income entries, which counts a booking of five seats as one ticket. With FairSeat on it now counts seats in paid, confirmed bookings, plus one for each ticket income entry that is not tied to a booking. With FairSeat off it is unchanged.
+
+## GateSync handoff
+
+`event_tickets` is the handoff. FairSeat creates one row per seat when a booking is confirmed, and GateSync does the rest. FairSeat generates no credential and has no scanner logic.
+
+| Column | Meaning for GateSync |
+|---|---|
+| `id` | Ticket identifier. An internal reference only; it must not be what a QR code proves |
+| `booking_id` | Join to `ticket_bookings` for `ticket_category_id`, `status` and `payment_status` |
+| `event_id` | The event the ticket admits to |
+| `holder_user_id` | The authorised attendee (today, the purchaser for every seat of the booking) |
+| `seat_number` | 1..quantity within the booking |
+| `status` | `pending_issue` → `issued` → `checked_in`, or `revoked` from any state |
+| `credential_digest` | NULL until GateSync issues. 32 bytes, unique |
+| `issued_at`, `checked_in_at`, `revoked_at` | Set with the matching status |
+
+What GateSync must do:
+
+- **Issue** only for rows with `status = 'pending_issue'` whose booking is `confirmed`. Generate a random secret of at least 128 bits, give it to the attendee in the QR code, and store only its SHA-256 digest in `credential_digest`. Never store the secret, and never put a ticket id alone in the QR code: ids are not secret.
+- **Issue idempotently:** `UPDATE event_tickets SET credential_digest = :d, status = 'issued', issued_at = now() WHERE id = :id AND status = 'pending_issue'`. Zero rows updated means it was already issued or revoked.
+- **Check in atomically:** hash the scanned secret, then `UPDATE event_tickets SET status = 'checked_in', checked_in_at = now() WHERE credential_digest = :d AND event_id = :event AND status = 'issued' RETURNING id`. One row means admit. Zero rows means refuse, and a second scan of the same code gets zero rows.
+- **Respect revocation.** FairSeat sets `revoked` when a booking is cancelled or refunded. A revoked ticket never matches the check-in update. GateSync should not un-revoke.
+- **Leave `checked_in` alone.** FairSeat refuses a purchaser's cancellation once any ticket of the booking is checked in.
+
+Still open for the team: naming attendees other than the purchaser, and reissuing a lost credential.
 
 ## Known gaps
 
+- Stripe has not been contacted for tickets. The Stripe path is tested with its network calls stubbed.
+- A refund that fails needs a treasurer to retry it; nothing retries automatically.
+- If the server stops between marking a refund pending and hearing from the provider, it stays `pending` until the webhook arrives or a treasurer retries. Retrying is safe.
 - The only page is the organizer's ticket settings (`/events/{id}/tickets`). Buying is API only, and Ameer's `web/` app is not connected to it.
 - No scheduled job runs `expire_holds`. Correctness does not depend on it, because expired holds are ignored by the count and tidied on the next booking.
 - A purchaser must belong to the event's club, because a user has exactly one club today.

@@ -79,6 +79,12 @@ async def test_every_seat_changing_operation_locks_in_the_agreed_order(db, world
         event = await session.get(Event, gala.id)
         await event_service.change_status(session, acting(world.president), event, "cancelled")
 
+    async def record_payment(session):
+        from app.services import fairseat_payments
+
+        await fairseat_payments.record_payment(session, uuid.UUID(other["booking_id"]), payment_intent_id="pi_lock_order",
+                                               paise=other["total_price_paise"], currency="inr")
+
     async def locked_tables(probe) -> set[str]:
         found = set()
         for table, (column, value) in rows.items():
@@ -91,7 +97,8 @@ async def test_every_seat_changing_operation_locks_in_the_agreed_order(db, world
 
     # (operation, the last table it locks)
     operations = [(reserve, "ticket_categories"), (cancel, "ticket_bookings"), (sweep, "ticket_categories"),
-                  (save_settings, "ticket_categories"), (cancel_event, "ticket_bookings")]
+                  (save_settings, "ticket_categories"), (cancel_event, "ticket_bookings"),
+                  (record_payment, "ticket_bookings")]
     for operation, last in operations:
         reach = LOCK_ORDER[: LOCK_ORDER.index(last) + 1]
         for blocked_at in reach:

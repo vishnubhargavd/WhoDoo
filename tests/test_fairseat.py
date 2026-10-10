@@ -335,16 +335,17 @@ async def test_free_booking_is_confirmed_and_cancelling_revokes_its_tickets(clie
     assert await db.scalar(select(func.count()).select_from(LedgerEntry)) == 0
 
 
-async def test_a_used_or_paid_booking_cannot_be_cancelled_this_way(client, db, world, auth, category, book):
+async def test_a_used_or_paid_booking_cannot_be_cancelled_this_way(client, db, world, auth, category, book, monkeypatch):
+    monkeypatch.setattr(get_settings(), "fairseat_payments_enabled", False)  # as shipped: no way to refund
     cat = await category(capacity=4, price=0)
     free = (await book(world.member, cat)).json()
     await db.execute(text("UPDATE event_tickets SET status = 'checked_in', checked_in_at = now() WHERE booking_id = :id"),
                      {"id": free["booking_id"]})
     paid_cat = await category(capacity=4, price=5000, name="Paid")
     paid = (await book(world.member, paid_cat)).json()
-    # A later phase will mark bookings paid; here the state is set directly to test the guard.
-    await db.execute(text("UPDATE ticket_bookings SET status = 'confirmed', payment_status = 'paid', hold_expires_at = NULL "
-                          "WHERE id = :id"), {"id": paid["booking_id"]})
+    # With payments off nothing can mark a booking paid; the state is set directly to test the guard.
+    await db.execute(text("UPDATE ticket_bookings SET status = 'confirmed', payment_status = 'paid', hold_expires_at = NULL, "
+                          "stripe_payment_intent_id = 'pi_set_by_test_' || id, paid_at = now() WHERE id = :id"), {"id": paid["booking_id"]})
     await db.commit()
 
     used = await client.post(f"{API}/ticket-bookings/{free['booking_id']}/cancel", headers=auth(world.member))
@@ -803,23 +804,25 @@ async def test_member_discount_flows_from_a_server_source_and_is_rechecked(clien
 # --- Event cancellation hook, constraints, switch --------------------------------------------
 
 
-async def test_release_bookings_for_event_is_safe_to_call_on_cancellation(client, db, world, auth, gala, category, book):
+async def test_release_bookings_for_event_is_safe_to_call_on_cancellation(client, db, world, auth, gala, category, book, monkeypatch):
     paid_cat, free_cat = await category(capacity=5), await category(capacity=5, price=0, name="Free")
     held = (await book(world.member, paid_cat, quantity=2)).json()
     await book(world.outsider, free_cat, quantity=2)
 
     async with SessionLocal() as session:
-        assert await fairseat_service.release_bookings_for_event(session, gala.id) == 2
+        assert await fairseat_service.release_bookings_for_event(session, gala.id) == []  # nobody to refund
         await session.commit()
     assert await occupied(db, paid_cat) == 0 and await occupied(db, free_cat) == 0
     assert {ticket.status for ticket in await db.scalars(select(EventTicket))} == {"revoked"}
     assert {row.status for row in await bookings(db, paid_cat)} == {"cancelled"}
 
-    # With a paid booking present it refuses and changes nothing: that needs the refund workflow.
+    # With ticket payments off and a paid booking present, it refuses and changes nothing:
+    # there would be no way to return the money. (With payments on, see test_fairseat_payments.py.)
+    monkeypatch.setattr(get_settings(), "fairseat_payments_enabled", False)
     again = (await book(world.member, paid_cat)).json()
     kept = (await book(world.volunteer, paid_cat)).json()
-    await db.execute(text("UPDATE ticket_bookings SET status = 'confirmed', payment_status = 'paid', hold_expires_at = NULL "
-                          "WHERE id = :id"), {"id": again["booking_id"]})
+    await db.execute(text("UPDATE ticket_bookings SET status = 'confirmed', payment_status = 'paid', hold_expires_at = NULL, "
+                          "stripe_payment_intent_id = 'pi_set_by_test_' || id, paid_at = now() WHERE id = :id"), {"id": again["booking_id"]})
     await db.commit()
     async with SessionLocal() as session:
         with pytest.raises(AppError) as blocked:
@@ -835,11 +838,17 @@ async def test_database_refuses_inconsistent_booking_states(db, world, category,
     booking = (await book(world.member, cat)).json()
     impossible = [
         "status = 'confirmed', payment_status = 'pending', hold_expires_at = NULL",       # confirmed but unpaid
-        "status = 'confirmed', payment_status = 'paid'",                                   # confirmed yet still on a hold
-        "status = 'pending_payment', payment_status = 'paid'",                             # paid yet still waiting
+        "status = 'confirmed', payment_status = 'paid', stripe_payment_intent_id = 'pi_x', paid_at = now()",  # confirmed yet still on a hold
+        "status = 'pending_payment', payment_status = 'paid', stripe_payment_intent_id = 'pi_x', paid_at = now()",  # paid yet still waiting
+        "status = 'confirmed', payment_status = 'paid', hold_expires_at = NULL",           # paid with no payment on record
+        "status = 'cancelled', payment_status = 'paid', hold_expires_at = NULL, stripe_payment_intent_id = 'pi_x', paid_at = now()",  # paid, cancelled, no refund owed
+        "status = 'cancelled', payment_status = 'refunded', refund_status = 'pending', hold_expires_at = NULL, stripe_payment_intent_id = 'pi_x', paid_at = now()",  # refunded before the provider said so
+        "status = 'confirmed', payment_status = 'paid', refund_status = 'required', hold_expires_at = NULL, stripe_payment_intent_id = 'pi_x', paid_at = now()",  # seats kept while a refund is owed
         "status = 'pending_payment', hold_expires_at = NULL",                              # a hold with no deadline
         "status = 'confirmed', payment_status = 'not_required', hold_expires_at = NULL",   # "free" with a price
         "status = 'expired', payment_status = 'refunded', hold_expires_at = NULL",         # refund of nothing
+        "refund_status = 'required'",                                                      # a refund owed on an unpaid hold
+        "refunded_at = now()",                                                             # a refund date with no refund
         "total_price_paise = 1",                                                           # total is not unit x quantity
     ]
     for change in impossible:
