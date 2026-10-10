@@ -13,12 +13,12 @@ TaskPriority = Literal["low", "medium", "high"]
 class _Input(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    @field_validator("due_at", check_fields=False)
+    @field_validator("due_at", "starts_at", "ends_at", check_fields=False)
     @classmethod
     def _aware(cls, value):
         return as_aware(value)
 
-    @field_validator("description", "blocker_note", check_fields=False)
+    @field_validator("description", "blocker_note", "override_reason", check_fields=False)
     @classmethod
     def _blank_is_none(cls, value):
         return value or None
@@ -31,6 +31,16 @@ class TaskCreate(_Input):
     priority: TaskPriority = "medium"
     is_critical: bool = False
     due_at: datetime | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    override_clash: bool = False
+    override_reason: str | None = Field(None, max_length=500)
+
+    @model_validator(mode="after")
+    def _schedule_order(self):
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise invalid("Duty end time must be after start time")
+        return self
 
 
 class TaskUpdate(_Input):
@@ -43,11 +53,17 @@ class TaskUpdate(_Input):
     priority: TaskPriority | None = None
     is_critical: bool | None = None
     due_at: datetime | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    override_clash: bool = False
+    override_reason: str | None = Field(None, max_length=500)
 
     @model_validator(mode="after")
-    def _one_assignee_change(self):
+    def _validate_update(self):
         if self.unassign and self.assignee_id:
             raise invalid("Choose either an assignee or unassign, not both")
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise invalid("Duty end time must be after start time")
         return self
 
 
@@ -78,6 +94,8 @@ class TaskOut(BaseModel):
     status: str
     blocker_note: str | None
     due_at: datetime | None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
     created_by: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -86,6 +104,30 @@ class TaskOut(BaseModel):
     clashes: list[str] = Field(default_factory=list, description="Integration point for volunteer clash review")
     can_edit: bool = False
     can_update_status: bool = False
+
+
+class ClashCheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: uuid.UUID | None = None
+    assignee_id: uuid.UUID
+    title: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+
+    @field_validator("starts_at", "ends_at", check_fields=False)
+    @classmethod
+    def _aware(cls, value):
+        return as_aware(value)
+
+
+class ClashCheckOut(BaseModel):
+    has_clashes: bool
+    is_exact_duplicate: bool
+    can_override: bool
+    clashes: list[str] = Field(default_factory=list)
+    clash_details: list[dict] = Field(default_factory=list)
+
 
 
 class TaskActivityOut(BaseModel):

@@ -240,6 +240,8 @@
             {% if t.is_critical %}<span class="badge critical">Critical</span>{% endif %}
             <span class="badge {{ t.priority }}">{{ t.priority | label }}</span>
             {% for r in t.risks if r != "blocked" %}<span class="badge at_risk">{{ {"blocked": "Blocked", "overdue": "Overdue", "unassigned": "No owner", "critical_due_soon": "Critical, event soon"}[r] }}</span>{% endfor %}
+            {% for c in t.clashes %}<span class="badge at_risk" style="background: #fef3c7; color: #92400e; border: 1px solid #f59e0b">⚠️ {{ c }}</span>{% endfor %}
+            {% if t.starts_at and t.ends_at %}<div class="muted" style="font-size: 12px">Duty: {{ t.starts_at | ist('%d %b %H:%M') }} - {{ t.ends_at | ist('%H:%M') }}</div>{% endif %}
             {% if t.description %}<div class="muted" style="font-size: 13px">{{ t.description }}</div>{% endif %}
             {% if t.blocker_note %}<div class="blocker">Blocker: {{ t.blocker_note }}</div>{% endif %}
           </td>
@@ -289,9 +291,15 @@
         <label>Priority
           <select name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
         </label>
+        <label>Duty Starts (IST) <input type="datetime-local" name="starts_at"></label>
+        <label>Duty Ends (IST) <input type="datetime-local" name="ends_at"></label>
       </div>
       <label>Details <textarea name="description" maxlength="1000" placeholder="Optional"></textarea></label>
       <label class="check"><input type="checkbox" name="is_critical"> Critical: the event cannot happen without this</label>
+      <div style="border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px; margin-top: 8px; background: #f8fafc">
+        <label class="check" style="font-weight: 600; color: #b45309"><input type="checkbox" name="override_clash" value="true"> Override Volunteer Clash (Authorized Organizers Only)</label>
+        <label style="margin-top: 6px">Override Reason <input type="text" name="override_reason" placeholder="Mandatory reason explaining conflict resolution"></label>
+      </div>
       <div class="actions"><button type="submit">Add task</button></div>
     </form>
   </details>

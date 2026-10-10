@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db
-from app.schemas.crewpulse import TaskCreate, TaskOut
+from app.schemas.crewpulse import ClashCheckOut, ClashCheckRequest, TaskCreate, TaskOut
 from app.schemas.events import (
     EventBudgetDashboardOut,
     EventCreate,
@@ -140,6 +140,19 @@ async def create_task(
     task = await task_service.create_task(db, user, event, body)
     await db.commit()
     return (await task_service.to_out(db, user, [task]))[0]
+
+
+@router.post("/{event_id}/tasks/check-clashes", response_model=ClashCheckOut, tags=["CrewPulse"])
+async def check_task_clashes(
+    event_id: uuid.UUID,
+    body: ClashCheckRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ClashCheckOut:
+    """Preview volunteer scheduling clashes, duplicates, and override feasibility before finalizing assignments."""
+    event = await event_service.get_visible_event(db, user, event_id)
+    return await task_service.preview_clashes(db, user, event, body)
+
 
 
 @router.get("/{event_id}/budget", response_model=EventBudgetDashboardOut, tags=["Event Management"])

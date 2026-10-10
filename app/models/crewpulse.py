@@ -25,6 +25,8 @@ class CrewTask(Base):
     status: Mapped[str] = mapped_column(Text, default="todo")
     blocker_note: Mapped[str | None] = mapped_column(Text)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
@@ -43,3 +45,18 @@ class CrewTaskActivity(Base):
     to_value: Mapped[str | None] = mapped_column(Text)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = created_at_col()
+
+
+class CrewTaskClashOverride(Base):
+    __tablename__ = "crew_task_clash_overrides"
+
+    id: Mapped[uuid.UUID] = uuid_pk()
+    task_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("crew_tasks.id"))
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("events.id"))
+    club_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    volunteer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    overridden_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    clash_summary: Mapped[str] = mapped_column(Text)
+    override_reason: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = created_at_col()
+
