@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Merch admin · WhoDoo Finance{% endblock %}
+{% block content %}
+<h1>Merchandise</h1>
+<p class="sub">Products, variants and stock. Stock goes down only when a payment is verified.</p>
+
+{% for product in products %}
+<div class="card">
+  <div class="actions" style="justify-content: space-between">
+    <h2>{{ product.name }}
+      <span class="badge {{ 'paid' if product.is_active else 'cancelled' }}">{{ "On sale" if product.is_active else "Hidden" }}</span>
+    </h2>
+    <button class="small secondary" data-put="/api/v1/merch/products/{{ product.id }}"
+            data-body='{"is_active": {{ "false" if product.is_active else "true" }}}'>
+      {{ "Hide from store" if product.is_active else "Put on sale" }}
+    </button>
+  </div>
+
+  <form data-api="PUT" action="/api/v1/merch/products/{{ product.id }}" class="stack">
+    <div class="fields">
+      <label>Name <input type="text" name="name" value="{{ product.name }}" required></label>
+      <label>Base price (₹) <input type="number" name="base_price" value="{{ product.base_price }}" min="0.01" step="0.01" required></label>
+      <label>Member price (₹) <input type="number" name="member_price" value="{{ product.member_price }}" min="0.01" step="0.01" required></label>
+      <label>&nbsp;<button type="submit" class="secondary">Save product</button></label>
+    </div>
+  </form>
+
+  <div class="table-wrap" style="margin-top: 12px">
+    <table>
+      <thead><tr><th>SKU</th><th>Size</th><th>Colour</th><th class="num">Price override</th><th>Stock</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for variant in product.variants %}
+        <tr>
+          <td class="nowrap">{{ variant.sku }}</td>
+          <td>{{ variant.size }}</td>
+          <td>{{ variant.color }}</td>
+          <td class="num">{{ variant.price_override | inr }}</td>
+          <td>
+            <form data-api="PUT" action="/api/v1/merch/variants/{{ variant.id }}" class="actions">
+              <input type="number" name="stock_quantity" value="{{ variant.stock_quantity }}" min="0" style="width: 90px" required
+                     aria-label="Stock for {{ variant.sku }}">
+              <button type="submit" class="small secondary">Set stock</button>
+            </form>
+          </td>
+          <td>
+            <button class="small secondary" data-put="/api/v1/merch/variants/{{ variant.id }}"
+                    data-body='{"is_active": {{ "false" if variant.is_active else "true" }}}'>
+              {{ "Active — disable" if variant.is_active else "Disabled — enable" }}
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="empty">No variants yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <form data-api="POST" action="/api/v1/merch/products/{{ product.id }}/variants" class="stack" style="margin-top: 12px">
+    <div class="fields">
+      <label>Size <input type="text" name="size" required placeholder="M"></label>
+      <label>Colour <input type="text" name="color" required placeholder="Black"></label>
+      <label>SKU <input type="text" name="sku" required placeholder="HOOD-BLK-M"></label>
+      <label>Stock <input type="number" name="stock_quantity" value="0" min="0" required></label>
+      <label>Price override (₹) <input type="number" name="price_override" min="0.01" step="0.01" placeholder="Optional"></label>
+      <label>&nbsp;<button type="submit">Add variant</button></label>
+    </div>
+  </form>
+</div>
+{% else %}
+<div class="card"><p class="empty">No products yet.</p></div>
+{% endfor %}
+
+<div class="card">
+  <h2>New product</h2>
+  <form data-api="POST" action="/api/v1/merch/products" class="stack">
+    <div class="fields">
+      <label>Name <input type="text" name="name" minlength="2" required></label>
+      <label>Base price (₹) <input type="number" name="base_price" min="0.01" step="0.01" required></label>
+      <label>Member price (₹) <input type="number" name="member_price" min="0.01" step="0.01" required></label>
+      <label>Image URL <input type="text" name="image_url" placeholder="Optional"></label>
+    </div>
+    <label>Description <input type="text" name="description" placeholder="Optional"></label>
+    <div class="actions"><button type="submit">Create product</button></div>
+  </form>
+</div>
+{% endblock %}

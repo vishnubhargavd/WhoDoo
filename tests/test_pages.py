@@ -73,3 +73,37 @@ async def test_expense_pages(client, world, auth):
     await client.post(f"{API}/{claim_id}/request-changes", headers=auth(world.lead2), json={"comment": "Add the invoice"})
     client.cookies.update(_cookie(world.volunteer))
     assert "Resubmit for approval" in (await client.get(f"/expenses/{claim_id}")).text
+
+
+async def test_store_and_merch_admin_pages(client, world, auth):
+    created = await client.post("/api/v1/merch/products", headers=auth(world.treasurer), json={
+        "name": "Club Hoodie", "base_price": "999", "member_price": "799",
+        "variants": [{"size": "M", "color": "Black", "sku": "HOOD-BLK-M", "stock_quantity": 10}],
+    })
+    product = created.json()
+    order = (await client.post("/api/v1/merch/orders", headers=auth(world.member), json={
+        "items": [{"variant_id": product["variants"][0]["id"], "quantity": 1}]})).json()
+
+    client.cookies.update(_cookie(world.member))
+    store = await client.get("/store")
+    assert store.status_code == 200 and "Club Hoodie" in store.text and "₹799.00" in store.text
+    detail = await client.get(f"/store/{product['id']}")
+    assert detail.status_code == 200 and "10 left" in detail.text
+    checkout = await client.get(f"/checkout/{order['id']}")
+    assert checkout.status_code == 200
+    assert "Mock Payment (Razorpay-compatible)" in checkout.text and "mock success" in checkout.text
+    mine = await client.get("/orders")
+    assert mine.status_code == 200 and order["order_number"] in mine.text and "Pay now" in mine.text
+    assert (await client.get("/admin/merch")).status_code == 403
+    assert (await client.get("/admin/merch/orders")).status_code == 403
+
+    # Someone else's checkout page does not exist for them.
+    client.cookies.update(_cookie(world.outsider))
+    assert (await client.get(f"/checkout/{order['id']}")).status_code == 404
+    assert "₹999.00" in (await client.get("/store")).text
+
+    client.cookies.update(_cookie(world.treasurer))
+    admin = await client.get("/admin/merch")
+    assert admin.status_code == 200 and "HOOD-BLK-M" in admin.text
+    admin_orders = await client.get("/admin/merch/orders")
+    assert admin_orders.status_code == 200 and "Mia Member" in admin_orders.text

@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Checkout {{ order.order_number }} · WhoDoo Finance{% endblock %}
+{% block content %}
+<h1>Checkout</h1>
+<p class="sub">Order {{ order.order_number }}</p>
+
+{% if provider.is_mock %}
+<div class="notice info"><strong>Mock Payment (Razorpay-compatible).</strong>
+  No real money moves. The order still goes through the same create order → verify signature → ledger steps as Razorpay.</div>
+{% endif %}
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Item</th><th>SKU</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Total</th></tr></thead>
+      <tbody>
+        {% for item in order.items %}
+        <tr>
+          <td>{{ item.product_name }} ({{ item.size }}, {{ item.color }})</td>
+          <td class="muted">{{ item.sku }}</td>
+          <td class="num">{{ item.quantity }}</td>
+          <td class="num">{{ item.unit_price | inr }}</td>
+          <td class="num">{{ item.line_total | inr }}</td>
+        </tr>
+        {% endfor %}
+        <tr><td colspan="4" class="right"><strong>To pay</strong></td><td class="num"><strong>{{ order.total_amount | inr }}</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  {% if order.payment_status == "paid" %}
+    <div class="notice ok">Paid. Payment reference {{ order.razorpay_payment_id }}.</div>
+    <a class="button secondary" href="/orders">View my orders</a>
+  {% elif order.status != "created" %}
+    <div class="notice error">This order is {{ order.status }} (payment {{ order.payment_status }}) and can no longer be paid.</div>
+    <a class="button secondary" href="/store">Back to store</a>
+  {% elif not is_owner %}
+    <p class="muted">Only the buyer can pay for this order.</p>
+  {% elif provider.is_mock %}
+    <div class="actions">
+      <button class="success" id="pay-ok">Pay {{ order.total_amount | inr }} (mock success)</button>
+      <button class="danger" id="pay-fail">Simulate a failed payment</button>
+    </div>
+  {% else %}
+    <button class="success" id="pay-razorpay">Pay {{ order.total_amount | inr }} with Razorpay</button>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+{% if order.status == "created" and is_owner %}
+{% if not provider.is_mock %}<script src="https://checkout.razorpay.com/v1/checkout.js"></script>{% endif %}
+<script>
+  const merchOrderId = "{{ order.id }}";
+
+  // Step 1: the server opens the provider order and fixes the amount.
+  async function openPayment() {
+    return api("POST", "/api/v1/payments/razorpay/create-order", { merch_order_id: merchOrderId });
+  }
+
+  // Step 3: the server verifies the signature before anything is marked paid.
+  async function verify(result) {
+    try {
+      await api("POST", "/api/v1/payments/razorpay/verify", {
+        razorpay_order_id: result.razorpay_order_id,
+        razorpay_payment_id: result.razorpay_payment_id,
+        razorpay_signature: result.razorpay_signature,
+      });
+      window.location.href = "/orders";
+    } catch (error) {
+      showMessage(error.message);
+      setTimeout(() => window.location.reload(), 2500);
+    }
+  }
+
+  async function mockPay(outcome, button) {
+    button.disabled = true;
+    try {
+      const payment = await openPayment();
+      // Step 2 (mock): stands in for the Razorpay Checkout popup.
+      const result = await api("POST", "/api/v1/payments/mock/simulate",
+        { razorpay_order_id: payment.razorpay_order_id, outcome });
+      await verify(result);
+    } catch (error) {
+      showMessage(error.message);
+      button.disabled = false;
+    }
+  }
+
+  const ok = document.getElementById("pay-ok");
+  const fail = document.getElementById("pay-fail");
+  const real = document.getElementById("pay-razorpay");
+  if (ok) ok.addEventListener("click", () => mockPay("success", ok));
+  if (fail) fail.addEventListener("click", () => mockPay("failure", fail));
+  if (real) real.addEventListener("click", async () => {
+    real.disabled = true;
+    try {
+      const payment = await openPayment();
+      new Razorpay({
+        key: payment.key_id,
+        order_id: payment.razorpay_order_id,
+        amount: payment.amount,
+        currency: payment.currency,
+        name: "WhoDoo",
+        description: "Order " + payment.order_number,
+        handler: verify,
+        modal: { ondismiss: () => { real.disabled = false; } },
+      }).open();
+    } catch (error) {
+      showMessage(error.message);
+      real.disabled = false;
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}

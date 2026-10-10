@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Merch orders · WhoDoo Finance{% endblock %}
+{% block content %}
+<h1>Merchandise orders</h1>
+<p class="sub">Cancelling a paid order puts the stock back and posts a refund to the ledger.</p>
+<div class="card">
+  {% if orders %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Order</th><th>Placed</th><th>Buyer</th><th>Items</th><th>Payment</th><th>Status</th><th class="num">Total</th><th></th></tr></thead>
+      <tbody>
+        {% for order in orders %}
+        {% set url = "/api/v1/merch/orders/" ~ order.id ~ "/status" %}
+        <tr>
+          <td class="nowrap">{{ order.order_number }}</td>
+          <td class="nowrap">{{ order.created_at | nice_date }}</td>
+          <td>{{ order.user_name or "—" }}</td>
+          <td>{% include "_order_items.html" %}</td>
+          <td><span class="badge {{ order.payment_status }}">{{ order.payment_status | label }}</span></td>
+          <td><span class="badge {{ order.status }}">{{ order.status | label }}</span></td>
+          <td class="num">{{ order.total_amount | inr }}</td>
+          <td>
+            <div class="actions">
+              {% if order.status == "paid" %}
+                <button class="small" data-post="{{ url }}" data-body='{"status": "packed"}'>Mark packed</button>
+              {% elif order.status == "packed" %}
+                <button class="small success" data-post="{{ url }}" data-body='{"status": "delivered"}'>Mark delivered</button>
+              {% endif %}
+              {% if order.status in ("created", "paid", "packed") %}
+                <button class="small danger" data-post="{{ url }}" data-body='{"status": "cancelled"}'
+                        data-confirm="{{ 'Cancel and refund ' ~ (order.total_amount | inr) ~ '?' if order.payment_status == 'paid' else 'Cancel this unpaid order?' }}">
+                  {{ "Cancel and refund" if order.payment_status == "paid" else "Cancel" }}
+                </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No orders yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

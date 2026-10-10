@@ -1,7 +1,9 @@
 from fastapi import APIRouter
 
-from app.api.v1 import expenses, ledger
+from app.api.v1 import expenses, ledger, merch, payments
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(ledger.router)
 api_router.include_router(expenses.router)
+api_router.include_router(merch.router)
+api_router.include_router(payments.router)

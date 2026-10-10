@@ -18,7 +18,7 @@ from app.core.dependencies import (
 )
 from app.models.ledger import ENTRY_TYPES, EXPENSE_CATEGORIES, PAYMENT_STATUSES, SOURCE_MODULES
 from app.schemas.ledger import LedgerFilters
-from app.services import expense_service, ledger_service, shared_directory
+from app.services import expense_service, ledger_service, merch_service, payment_service, shared_directory
 from app.web.templating import render
 
 router = APIRouter(include_in_schema=False)
@@ -128,3 +128,58 @@ async def expense_detail(
         categories=EXPENSE_CATEGORIES,
         approval_limit=get_settings().expense_auto_approval_limit,
     )
+
+
+# --- MerchFlow -------------------------------------------------------------------
+
+
+@router.get("/store")
+async def store(request: Request, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    products = await merch_service.list_products(db, user)
+    return render(request, "store.html", user, products=products)
+
+
+@router.get("/store/{product_id}")
+async def product_detail(
+    product_id: uuid.UUID,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    product = await merch_service.get_product(db, user, product_id)
+    events = await shared_directory.list_events(db, user.club_id)
+    return render(request, "product_detail.html", user, product=product, events=events)
+
+
+@router.get("/orders")
+async def my_orders(request: Request, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    orders = await merch_service.list_orders(db, user)
+    return render(request, "orders.html", user, orders=orders)
+
+
+@router.get("/checkout/{order_id}")
+async def checkout(
+    order_id: uuid.UUID,
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    order = await merch_service.get_order(db, user, order_id)
+    provider = payment_service.get_provider()
+    return render(request, "checkout.html", user, order=order, provider=provider, is_owner=order.user_id == user.id)
+
+
+@router.get("/admin/merch")
+async def admin_merch(
+    request: Request, user: CurrentUser = Depends(require_finance_admin), db: AsyncSession = Depends(get_db)
+):
+    products = await merch_service.list_products(db, user, include_inactive=True)
+    return render(request, "admin_merch.html", user, products=products)
+
+
+@router.get("/admin/merch/orders")
+async def admin_orders(
+    request: Request, user: CurrentUser = Depends(require_finance_admin), db: AsyncSession = Depends(get_db)
+):
+    orders = await merch_service.list_orders(db, user, everyone=True)
+    return render(request, "admin_orders.html", user, orders=orders)

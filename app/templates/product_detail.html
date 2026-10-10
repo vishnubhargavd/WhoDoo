@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ product.name }} · WhoDoo Finance{% endblock %}
+{% block content %}
+<p><a href="/store">← Back to store</a></p>
+<div class="grid two">
+  <div class="card product">
+    {% if product.image_url %}<img src="{{ product.image_url }}" alt="{{ product.name }}" style="height: 260px">
+    {% else %}<div class="noimg" style="height: 260px">{{ product.name[0] }}</div>{% endif %}
+    <h1 style="margin-top: 14px">{{ product.name }}</h1>
+    <p class="sub">{{ product.description or "" }}</p>
+    <dl class="kv">
+      <dt>Price</dt><dd>{{ product.base_price | inr }}</dd>
+      <dt>Member price</dt><dd>{{ product.member_price | inr }}</dd>
+      <dt>You pay</dt>
+      <dd><strong>{{ product.your_price | inr }}</strong>
+        <span class="muted">({{ "member price" if product.member_pricing_applied else "not an active member" }})</span></dd>
+    </dl>
+  </div>
+
+  <div class="card">
+    <h2>Order</h2>
+    {% set available = product.variants | selectattr("in_stock") | list %}
+    {% if available %}
+    <form id="order-form" class="stack">
+      <label>Size and colour
+        <select name="variant_id" required>
+          {% for variant in product.variants %}
+          <option value="{{ variant.id }}" {{ "disabled" if not variant.in_stock }}>
+            {{ variant.size }} · {{ variant.color }} — {{ variant.your_price | inr }}
+            ({{ variant.stock_quantity ~ " left" if variant.in_stock else "sold out" }})
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="fields">
+        <label>Quantity <input type="number" name="quantity" value="1" min="1" max="20" required></label>
+        <label>For an event (optional)
+          <select name="event_id">
+            <option value="">None</option>
+            {% for event in events %}<option value="{{ event.id }}">{{ event.name }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <div class="actions">
+        <button type="submit">Continue to payment</button>
+        {% if mock_payments %}<span class="muted">Mock Payment (Razorpay-compatible)</span>{% endif %}
+      </div>
+    </form>
+    {% else %}
+    <p class="empty">Sold out.</p>
+    {% endif %}
+
+    <h2 style="margin-top: 20px">Stock</h2>
+    <table>
+      <thead><tr><th>Size</th><th>Colour</th><th>SKU</th><th class="num">Your price</th><th class="num">In stock</th></tr></thead>
+      <tbody>
+        {% for variant in product.variants %}
+        <tr>
+          <td>{{ variant.size }}</td><td>{{ variant.color }}</td><td class="muted">{{ variant.sku }}</td>
+          <td class="num">{{ variant.your_price | inr }}</td><td class="num">{{ variant.stock_quantity }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const orderForm = document.getElementById("order-form");
+  if (orderForm) orderForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = orderForm.querySelector("button");
+    button.disabled = true;
+    try {
+      // Only the variant and quantity are sent. The server works out the price.
+      const fields = formToJson(orderForm);
+      const body = { items: [{ variant_id: fields.variant_id, quantity: fields.quantity }] };
+      if (fields.event_id) body.event_id = fields.event_id;
+      const order = await api("POST", "/api/v1/merch/orders", body);
+      window.location.href = "/checkout/" + order.id;
+    } catch (error) {
+      showMessage(error.message);
+      button.disabled = false;
+    }
+  });
+</script>
+{% endblock %}

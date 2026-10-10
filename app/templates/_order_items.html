@@ -1,0 +1,1 @@
+{% for item in order.items %}{{ item.quantity }} × {{ item.product_name }} ({{ item.size }}, {{ item.color }}){% if not loop.last %}<br>{% endif %}{% endfor %}
