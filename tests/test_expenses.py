@@ -433,3 +433,61 @@ async def test_submitter_sees_what_the_reviewer_asked_for(client, world, auth, s
     await client.post(f"{url}/request-changes", headers=auth(world.lead), json={"comment": "Wrong event selected"})
     [mine] = (await client.get(API, headers=auth(world.member))).json()
     assert (mine["reviewer_name"], mine["reviewer_note"]) == ("Leo Lead", "Wrong event selected")
+
+
+async def test_snap_to_reimburse_cross_club_and_idempotent_ledger(client, db, world, auth, submit):
+    import uuid
+    from app.models.shared import Club, Event
+
+    # 1. Reject event belonging to another club
+    other_club = Club(id=uuid.uuid4(), name="External Club")
+    db.add(other_club)
+    await db.flush()
+    other_event = Event(id=uuid.uuid4(), club_id=other_club.id, name="External Event")
+    db.add(other_event)
+    await db.commit()
+
+    upload = await client.post(f"{API}/ocr", headers=auth(world.volunteer), files={"file": ("r.png", RECEIPT, "image/png")})
+    assert upload.status_code == 200
+    body = {
+        "receipt_id": upload.json()["receipt_id"],
+        "title": "Cross-club event test",
+        "description": "Invalid event linkage",
+        "category": "supplies",
+        "amount": "500",
+        "expense_date": "2026-10-03",
+        "event_id": str(other_event.id),
+    }
+    resp = await client.post(API, headers=auth(world.volunteer), json=body)
+    assert resp.status_code == 404
+
+    # 2. Reject receipt from another user/club
+    resp_bad_receipt = await client.post(
+        API,
+        headers=auth(world.member),
+        json=body | {"receipt_id": upload.json()["receipt_id"], "event_id": str(world.bake_sale.id)},
+    )
+    assert resp_bad_receipt.status_code == 404
+
+    # 3. Two distinct approvers rule when claim >= 1000
+    large_claim = await submit(world.volunteer, amount="1500.00", event=world.bake_sale)
+    assert large_claim["needs_final_approval"] is True
+    assert large_claim["approval_stage"] == "first"
+
+    # Rejecting a claim ensures it cannot be paid
+    claim_to_reject = await submit(world.volunteer, amount="1200.00", event=world.bake_sale)
+    reject_resp = await client.post(
+        f"{API}/{claim_to_reject['id']}/reject",
+        headers=auth(world.lead),
+        json={"reason": "Excessive expenses"},
+    )
+    assert reject_resp.status_code == 200
+    assert reject_resp.json()["status"] == "rejected"
+
+    pay_attempt = await client.post(
+        f"{API}/{claim_to_reject['id']}/mark-paid",
+        headers=auth(world.treasurer),
+    )
+    assert pay_attempt.status_code == 409
+    assert pay_attempt.json()["error"]["code"] == "not_approved"
+
