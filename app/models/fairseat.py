@@ -137,7 +137,7 @@ class TicketBookingCommand(Base):
 
 
 class EventTicket(Base):
-    """One seat of a confirmed booking. GateSync will attach a credential to it later."""
+    """One seat of a confirmed booking. GateSync gives it a credential (gatesync_service)."""
 
     __tablename__ = "event_tickets"
 
