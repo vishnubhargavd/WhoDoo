@@ -7,7 +7,7 @@ PORT    ?= 8000
 PG_BIN  ?= $(shell brew --prefix postgresql@16 2>/dev/null)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install env db-start db-stop db-create migrate seed seed-finance seed-events run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend payments stripe-listen receipts psql clean
+.PHONY: help setup install env db-start db-stop db-create migrate seed seed-finance seed-events run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend test-fairseat fairseat-vectors payments stripe-listen receipts psql clean
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -83,6 +83,12 @@ test-merch: install ## Run only the MerchFlow and payment tests
 
 test-frontend: install ## Run only the landing, sign-in, home and navigation tests
 	$(PY) -m pytest -q tests/test_frontend.py
+
+test-fairseat: install ## Run only the FairSeat booking and ticket pricing tests (uses whodoo_test)
+	$(PY) -m pytest -q tests/test_fairseat.py tests/test_fairseat_pricing.py
+
+fairseat-vectors: ## Regenerate ticket price test vectors from MemberCore's TypeScript calculator (needs node 22.6+)
+	node --experimental-strip-types --no-warnings scripts/make_ticket_discount_vectors.mjs
 
 test-pages: install ## Run only the HTML page tests
 	$(PY) -m pytest -q tests/test_pages.py

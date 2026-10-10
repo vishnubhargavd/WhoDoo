@@ -15,6 +15,7 @@ os.environ["JWT_SECRET"] = "test-secret-that-is-long-enough-for-hs256"
 os.environ["PAYMENT_PROVIDER"] = "mock"
 os.environ["EXPENSE_AUTO_APPROVAL_LIMIT"] = "1000"
 os.environ["SUPABASE_URL"] = ""
+os.environ["FAIRSEAT_ENABLED"] = "1"
 os.environ["UPLOAD_DIR"] = tempfile.mkdtemp(prefix="whodoo-test-uploads-")
 
 import httpx  # noqa: E402
@@ -34,6 +35,25 @@ async def _schema():
     url = get_settings().database_url
     assert "test" in url.rsplit("/", 1)[-1], f"Refusing to reset a non-test database: {url}"
     await run_migrations(asyncpg_dsn(url), reset=True)
+
+
+@pytest.fixture(scope="session")
+async def fairseat_schema(_schema):
+    """FairSeat's tables are still a pending migration: `make migrate` does not apply it.
+    Tests add it to the disposable test database, on top of the real migrations."""
+    import asyncpg
+
+    from app.db.migrate import MIGRATIONS_DIR
+
+    url = get_settings().database_url
+    assert "test" in url.rsplit("/", 1)[-1] and get_settings().database_is_local, f"Not a local test database: {url}"
+    conn = await asyncpg.connect(asyncpg_dsn(url))
+    try:
+        if await conn.fetchval("SELECT to_regclass('public.ticket_categories')") is None:
+            async with conn.transaction():
+                await conn.execute((MIGRATIONS_DIR / "pending" / "020_fairseat.sql").read_text())
+    finally:
+        await conn.close()
 
 
 @pytest.fixture
