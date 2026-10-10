@@ -14,21 +14,24 @@ A FastAPI backend for the money side of a student club, with plain HTML pages fo
 Needs Python 3.13, PostgreSQL 14+ and (optionally) Tesseract.
 
 ```bash
-brew install postgresql@16 tesseract && brew services start postgresql@16
-createdb whodoo && createdb whodoo_test
-
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env                              # local Postgres, demo sign-in, mock payments
-
-.venv/bin/python -m scripts.seed_finance_demo --reset   # creates tables and demo data
-.venv/bin/uvicorn app.main:app --reload
+brew install postgresql@16 tesseract
+make setup      # virtual environment, .env, databases and demo data
+make run        # http://localhost:8000
 ```
 
 Open <http://localhost:8000> and pick a user on the demo sign-in page. API docs are at `/docs`.
 
-```bash
-.venv/bin/python -m pytest          # 43 tests, run against the whodoo_test database
-```
+Everyday commands (run `make help` for the full list):
+
+| Command | What it does |
+|---|---|
+| `make run` | Start the app with auto-reload (`make run PORT=8080` to change the port) |
+| `make test` | Run all 43 tests against the `whodoo_test` database |
+| `make test-ledger`, `test-expenses`, `test-merch` | Run one module's tests |
+| `make seed` | Wipe the local database and load fresh demo data |
+| `make migrate` | Apply pending SQL migrations |
+| `make db-start`, `make db-stop` | Start or stop the local Postgres service |
+| `make psql` | Open a SQL prompt on the local database |
 
 ## Environment variables
 
@@ -204,7 +207,7 @@ Pages read through the same services as the API, and every button calls the JSON
 ## Seed data
 
 ```bash
-.venv/bin/python -m scripts.seed_finance_demo --reset
+make seed
 ```
 
 Creates 1 president, 1 treasurer, 2 event leads, 5 volunteers and 10 members; 3 products with 7 variants; 10 orders (paid, packed, delivered, refunded, failed, unpaid); 8 expense claims across every state; and ledger entries for dues, tickets, a sponsorship, direct expenses, reimbursements and merchandise. Freshers' Night makes a profit and Tech Fest Workshop makes a loss.
