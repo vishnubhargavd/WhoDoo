@@ -49,7 +49,8 @@
       </p>
 
       <div class="hero-cta">
-        <a class="pill" data-magnetic href="{{ '/home' if user else '/login' }}">{{ "Open my WhoDoo" if user else "Enter WhoDoo" }}</a>
+        <a class="pill" data-magnetic href="{{ '/home' if user else '/login' }}">{{ "Open my WhoDoo" if user else "Sign in" }}</a>
+        <a class="pill" data-magnetic href="{{ '/explore' if user else '/events' }}">Browse events</a>
         <a class="pill" data-magnetic href="#features">Explore features
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
         </a>
@@ -69,7 +70,8 @@
         {% set accents = ("", "mint", "butter", "cobalt") %}
         {% for feature in features %}
         <li id="{{ feature.id }}" class="reveal" style="--i: {{ loop.index0 % 3 }}; scroll-margin-top: 24px">
-          {% if feature.href %}<a class="card tile" href="{{ feature.href if user else '/login?next=' ~ feature.href }}">
+          {# Events are public: a visitor goes straight to the list and can register without signing in. #}
+          {% if feature.href %}<a class="card tile" href="{{ feature.href if user or feature.href == '/events' else '/login?next=' ~ feature.href }}">
           {% else %}<article class="card tile">{% endif %}
             <div class="tile-top">
               <span class="tile-num"><span class="dot {{ accents[loop.index0 % 4] }}" aria-hidden="true"></span>{{ "%02d" | format(loop.index) }}</span>

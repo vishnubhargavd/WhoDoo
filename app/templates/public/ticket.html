@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Your ticket · {{ event.name }} · WhoDoo{% endblock %}
+{% block content %}
+<h1>{{ event.name }}</h1>
+<p class="sub">{{ event.starts_at | ist }} IST · {{ event.venue or "Venue to be announced" }}</p>
+
+<div class="card" data-ticket-token="{{ token }}" data-amount="{{ r.amount_paise }}" data-mock="{{ 'yes' if mock_payments else 'no' }}">
+  <p>{{ r.full_name }} · Participant ID <strong>{{ r.participant_code }}</strong> · No. {{ r.participant_no }}</p>
+
+  {% if r.status == "registered" and qr_svg %}
+  <div class="ticket-pass" style="max-width: 320px; margin: 12px auto">
+    <strong>You are registered</strong>
+    <div aria-label="Your QR ticket">{{ qr_svg | safe }}</div>
+    <span class="badge paid">Valid for one entry</span>
+  </div>
+  <p class="muted" style="text-align: center">Show this code at the entrance with your college ID. It admits one person, once:
+    whoever shows it first gets in, so do not share it.</p>
+  {% if r.email_status == "sent" %}
+  <p class="muted" style="text-align: center">A copy was emailed to {{ r.email }}. Check spam if it is not in your inbox.</p>
+  {% elif r.email_status == "failed" %}
+  <div class="notice error">The email to {{ r.email }} could not be sent. This page is your ticket: keep the link or print it, or try the email again.</div>
+  {% elif r.email_status == "saved" %}
+  <div class="notice info">No email was sent: email sending is not set up on this server. This page is your ticket: keep the link or print it.</div>
+  {% else %}
+  <p class="muted" style="text-align: center">Your ticket is being emailed to {{ r.email }}. Refresh in a moment to see whether it went.</p>
+  {% endif %}
+  <div class="actions" style="justify-content: center">
+    <button class="small secondary" data-post="/api/v1/public/registrations/{{ token }}/resend">Email it to me again</button>
+    <button class="small secondary" onclick="window.print()">Print</button>
+  </div>
+
+  {% elif r.status == "registered" %}
+  <div class="notice info">This event is {{ event.status | label }}, so tickets for it are not valid for entry.</div>
+
+  {% elif r.status == "checked_in" %}
+  <div class="notice info"><strong>Checked in</strong> at {{ r.checked_in_at | ist('%d %b, %H:%M') }} IST. This ticket has been used and cannot admit anyone again.</div>
+
+  {% elif r.status == "pending_payment" and not expired_hold %}
+  <div class="notice info">Your place is held until <strong>{{ r.hold_expires_at | ist('%H:%M') }} IST</strong>.
+    Pay <strong>{{ r.amount_paise | paise }}</strong> to confirm it.
+    {% if mock_payments %}(Mock payment: no real money moves.){% else %}You pay on Stripe's secure page.{% endif %}</div>
+  <div class="actions">
+    <button data-pay-registration>Pay {{ r.amount_paise | paise }}</button>
+    {% if mock_payments %}<button class="secondary" data-decline-registration>Simulate a declined card</button>{% endif %}
+  </div>
+
+  {% elif r.refund_status %}
+  <div class="notice error">Your payment arrived after this place could no longer be given.
+    {{ "It has been refunded." if r.refund_status == "succeeded" else "A refund is being processed." }}</div>
+  <p><a class="button secondary" href="/e/{{ event.id }}">Back to the event</a></p>
+
+  {% elif r.status == "cancelled" %}
+  <div class="notice error">This registration was cancelled by the organisers.</div>
+
+  {% else %}
+  <div class="notice error">The hold on this place ran out before it was paid for.</div>
+  <p><a class="button" href="/e/{{ event.id }}">Register again</a></p>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/public.js"></script>{% endblock %}

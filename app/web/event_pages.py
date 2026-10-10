@@ -9,9 +9,10 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import CurrentUser, get_current_user, get_db
+from app.core.dependencies import CurrentUser, get_current_user, get_db, get_optional_user
 from app.core.errors import AppError, forbidden
-from app.services import event_service, task_service, ticket_service
+from app.services import event_service, registration_service, task_service, ticket_service, venue_service
+from app.web.public_pages import public_events_page
 from app.services.syncsphere import IST
 from app.web.templating import inr, render, templates
 
@@ -47,9 +48,12 @@ templates.env.filters["paise_input"] = paise_input
 async def events_page(
     request: Request,
     scope: str = "upcoming",
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
+    # Not signed in: the public list any student can register from. Signed in: the club's own events.
+    if user is None:
+        return await public_events_page(request, None, db)
     scope = scope if scope in ("upcoming", "past") else "upcoming"
     events = await event_service.to_out(db, user, await event_service.list_events(db, user, scope))
     return render(request, "events/list.html", user, events=events, scope=scope,
@@ -61,7 +65,7 @@ async def new_event_page(request: Request, user: CurrentUser = Depends(get_curre
     if not event_service.can_create(user):
         raise forbidden("Only the president or an event lead can create events")
     leads = await event_service.list_leads(db, user.club_id)
-    return render(request, "events/form.html", user, event=None, leads=leads)
+    return render(request, "events/form.html", user, event=None, leads=leads, venues=await venue_service.list_venues(db))
 
 
 @router.get("/events/{event_id}/edit")
@@ -70,7 +74,7 @@ async def edit_event_page(
 ):
     event = await event_service.get_managed_event(db, user, event_id)
     leads = await event_service.list_leads(db, user.club_id)
-    return render(request, "events/form.html", user, event=event, leads=leads)
+    return render(request, "events/form.html", user, event=event, leads=leads, venues=await venue_service.list_venues(db))
 
 
 @router.get("/events/{event_id}")
@@ -86,8 +90,10 @@ async def event_detail_page(
         context.update(
             readiness=await event_service.readiness(db, user, event),
             schedule=await event_service.schedule_check(db, user, event),
-            people=await task_service.assignable_people(db, user.club_id),
-            missing=event_service.missing_for_publish(event),
+            people=await task_service.assignable_people(db, user.club_id, event.id),
+            missing=event_service.missing_for_publish(event) + await venue_service.registration_problems(db, event),
+            registrations=await registration_service.list_for_event(db, user, event)
+            if event.registration_mode != "none" else None,
             # None while FairSeat is off: its tables may not exist, and the page shows no ticket card.
             tickets=await ticket_service.config_out(db, event, can_manage=True) if ticket_service.enabled() else None,
         )

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ event.name }} · WhoDoo{% endblock %}
+{% block content %}
+<p><a href="/explore">← All events</a></p>
+<h1>{{ event.name }}</h1>
+<p class="sub">{{ event.club_name }} · {{ event.starts_at | ist }} – {{ event.ends_at | ist('%H:%M') }} IST</p>
+
+<div class="card">
+  <p><strong>Where:</strong> {{ event.venue or "To be announced" }}{% if event.venue_location %} <span class="muted">({{ event.venue_location }})</span>{% endif %}</p>
+  {% if event.description %}<p style="white-space: pre-wrap">{{ event.description }}</p>{% endif %}
+  {% if event.registration_mode != "none" %}
+  <p><strong>Entry:</strong> {{ event.price_paise | paise if event.registration_mode == "paid" else "Free" }}
+    · <strong>{{ event.places_left }}</strong> of {{ event.max_participants }} places left</p>
+  {% endif %}
+</div>
+
+{% if event.registration_state == "open" %}
+<div class="card">
+  <h2>{{ "Book your place" if event.registration_mode == "paid" else "Register" }}</h2>
+  <p class="muted">One place per student. Your ticket, a QR code, is emailed to you{% if event.registration_mode == "paid" %} once the payment goes through{% endif %}.</p>
+  <form id="register-form" class="stack" data-register="/api/v1/public/events/{{ event.id }}/register" novalidate>
+    <div class="fields">
+      <label>Full name <input type="text" name="full_name" required minlength="2" maxlength="120" autocomplete="name"></label>
+      <label>College student ID <input type="text" name="student_id" required maxlength="30" placeholder="e.g. 22CS1045" autocapitalize="characters"></label>
+      <label>Email <input type="email" name="email" required maxlength="200" autocomplete="email" placeholder="The ticket is sent here"></label>
+      <label>Phone <input type="tel" name="phone" required maxlength="20" autocomplete="tel" placeholder="10-digit mobile number"></label>
+    </div>
+    {# Left empty by people; filled in by form-filling bots. #}
+    <div aria-hidden="true" style="position: absolute; left: -9999px"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+    <div class="actions">
+      <button type="submit">{{ "Continue to payment · " ~ (event.price_paise | paise) if event.registration_mode == "paid" else "Register" }}</button>
+    </div>
+  </form>
+</div>
+{% elif event.registration_state == "full" %}
+<div class="notice error"><strong>Fully booked.</strong> All {{ event.max_participants }} places for this event are taken, so no more registrations can be accepted.</div>
+{% elif event.registration_state == "closed" %}
+<div class="notice info">Registration closed when the event started.</div>
+{% else %}
+<div class="notice info">This event does not take online registrations. Ask {{ event.club_name }} how to take part.</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="/static/public.js"></script>{% endblock %}

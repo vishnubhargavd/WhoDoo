@@ -19,7 +19,8 @@
     {% else %}
       <h3>Explore</h3>
       <ul>
-        {% for label, href in (("Events", "#event-autopilot"), ("Volunteers", "#crewpulse"), ("Finances", "#trustledger"),
+        <li class="wide" style="--i: 0"><a href="/events">Upcoming events · register</a></li>
+        {% for label, href in (("Event tools", "#event-autopilot"), ("Volunteers", "#crewpulse"), ("Finances", "#trustledger"),
                                ("Reimbursements", "#snap-to-reimburse"), ("Merchandise", "#merchflow"), ("Calendar", "#syncsphere")) %}
         <li style="--i: {{ loop.index0 }}"><a href="/{{ href }}">{{ label }}</a></li>
         {% endfor %}

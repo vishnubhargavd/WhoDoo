@@ -14,7 +14,7 @@ from app.core.dependencies import get_current_user
 from app.core.errors import AppError
 from app.db.database import SessionLocal
 from app.services import fairseat_pricing, membership_service, modules
-from app.web import dev_auth, event_pages, module_pages, pages
+from app.web import dev_auth, event_pages, module_pages, pages, public_pages
 from app.web.templating import APP_DIR, render
 
 logger = logging.getLogger("whodoo")
@@ -40,6 +40,7 @@ app.include_router(api_router)
 app.include_router(pages.router)
 app.include_router(event_pages.router)
 app.include_router(module_pages.router)
+app.include_router(public_pages.router)
 if settings.demo_auth:
     app.include_router(dev_auth.router)
 

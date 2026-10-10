@@ -67,6 +67,7 @@ SECTIONS = (
     ("Events", (
         ("Events", "/events", None, None),
         ("My tasks", "/my-tasks", None, None),
+        ("Public page", "/explore", None, None),
     )),
     ("Tickets", (
         ("Book tickets", "/tickets", None, "tickets"),

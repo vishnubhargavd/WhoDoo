@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Events · WhoDoo{% endblock %}
+{% block content %}
+<h1>Upcoming events</h1>
+<p class="sub">Open to every student. Pick an event and register: no account needed.
+  {% if not user %}Running a club? <a href="/login?next=/events">Sign in</a> to manage your events.{% endif %}</p>
+
+{% for e in events %}
+<article class="card">
+  <div class="actions" style="justify-content: space-between; align-items: flex-start">
+    <div>
+      <h2><a href="/e/{{ e.id }}">{{ e.name }}</a>
+        {% if e.registration_mode == "paid" %}<span class="badge final">{{ e.price_paise | paise }}</span>
+        {% elif e.registration_mode == "free" %}<span class="badge paid">Free</span>{% endif %}</h2>
+      <p class="muted">{{ e.club_name }} · {{ e.starts_at | ist }} IST · {{ e.venue or "Venue to be announced" }}</p>
+      {% if e.description %}<p>{{ e.description | truncate(180) }}</p>{% endif %}
+    </div>
+    <div style="text-align: right">
+      {% if e.registration_state == "open" %}
+      <a class="button" href="/e/{{ e.id }}">{{ "Book a place" if e.registration_mode == "paid" else "Register" }}</a>
+      <p class="muted">{{ e.places_left }} of {{ e.max_participants }} places left</p>
+      {% elif e.registration_state == "full" %}
+      <span class="badge cancelled">Fully booked</span>
+      <p class="muted">All {{ e.max_participants }} places are taken</p>
+      {% elif e.registration_state == "closed" %}
+      <span class="badge cancelled">Registration closed</span>
+      {% else %}
+      <a class="button secondary" href="/e/{{ e.id }}">Details</a>
+      {% endif %}
+    </div>
+  </div>
+</article>
+{% else %}
+<div class="card"><p class="empty">No events are coming up right now. Check back soon.</p></div>
+{% endfor %}
+{% endblock %}

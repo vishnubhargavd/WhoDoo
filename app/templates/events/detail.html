@@ -133,6 +133,45 @@
 </div>
 {% endif %}
 
+{% if organizer and registrations %}
+{# ---- Public registration (organizers only) ---- #}
+<section class="card" aria-labelledby="registrations-title">
+  <div class="actions" style="justify-content: space-between">
+    <h2 id="registrations-title">Registrations
+      <span class="badge {{ 'cancelled' if registrations.taken >= registrations.limit else 'paid' }}">{{ registrations.taken }} / {{ registrations.limit }}</span></h2>
+    <span class="actions">
+      {% if event.status == "published" %}<a class="button secondary small" href="/e/{{ event.id }}">Public page</a>
+      <a class="button secondary small" href="/check-in/{{ event.id }}">Open the door</a>{% endif %}
+    </span>
+  </div>
+  <p class="muted">{{ "Free" if event.registration_mode == "free" else (event.price_paise | paise) ~ " each" }}
+    · {{ registrations.checked_in }} checked in
+    · participant details are deleted some weeks after the event{% if event.status != "published" %} · students can register once the event is published{% endif %}</p>
+  {% if registrations.registrations %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>No.</th><th>Participant</th><th>Student ID</th><th>Contact</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for r in registrations.registrations %}
+      <tr>
+        <td>{{ r.participant_no }}</td>
+        <td>{{ r.full_name }}<br><span class="muted">{{ r.participant_code }}</span></td>
+        <td class="nowrap">{{ r.student_id }}</td>
+        <td>{{ r.email }}<br><span class="muted">{{ r.phone }}</span></td>
+        <td><span class="badge {{ {'registered': 'paid', 'checked_in': 'final', 'pending_payment': 'pending'}.get(r.status, 'cancelled') }}">{{ r.status | label }}</span>
+          {% if r.refund_status %}<span class="muted">refund {{ r.refund_status }}</span>{% endif %}</td>
+        <td>{% if r.status in ("registered", "pending_payment") %}<button class="small danger"
+              data-post="/api/v1/events/registrations/{{ r.id }}/cancel"
+              data-confirm="Remove {{ r.full_name }} from this event?{{ ' Their payment will be refunded.' if r.amount_paise and r.status == 'registered' }}">Remove</button>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="empty">Nobody has registered yet.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if organizer and tickets %}
 {# ---- FairSeat ticket settings (organizers only) ---- #}
 <section class="card" aria-labelledby="tickets-title">
@@ -169,7 +208,7 @@
   {% if tasks %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Task</th><th>Owner</th><th>Due</th><th>Status</th>{% if organizer %}<th></th>{% endif %}</tr></thead>
+      <thead><tr><th>Task</th><th>Allocated to</th><th>Due</th><th>Status</th>{% if organizer %}<th></th>{% endif %}</tr></thead>
       <tbody>
         {% for t in tasks %}
         <tr class="{{ 'risk-row' if t.risks }}">
@@ -183,8 +222,12 @@
           </td>
           <td>
             {% if t.can_edit %}
-            <select data-assign="/api/v1/tasks/{{ t.id }}" aria-label="Owner of {{ t.title }}">
+            <select data-assign="/api/v1/tasks/{{ t.id }}" aria-label="Allocate {{ t.title }} to">
               <option value="">Unassigned</option>
+              {# Whoever has it now stays shown, even if they are not in the list offered for new tasks. #}
+              {% if t.assignee_id and t.assignee_id not in people | map(attribute="id") | list %}
+              <option value="{{ t.assignee_id }}" selected>{{ t.assignee_name }}</option>
+              {% endif %}
               {% for person in people %}
               <option value="{{ person.id }}" {% if t.assignee_id == person.id %}selected{% endif %}>{{ person.full_name }}</option>
               {% endfor %}
@@ -217,7 +260,7 @@
     <form class="stack" data-api="POST" action="/api/v1/events/{{ event.id }}/tasks">
       <div class="fields">
         <label>Task <input type="text" name="title" minlength="3" maxlength="120" required placeholder="e.g. Book the DJ"></label>
-        <label>Owner
+        <label>Allocate task to
           <select name="assignee_id">
             <option value="">Unassigned</option>
             {% for person in people %}<option value="{{ person.id }}">{{ person.full_name }} ({{ person.role | label }})</option>{% endfor %}
