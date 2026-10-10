@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     fairseat_quote_seconds: int = 300
     fairseat_max_per_booking: int = 6
     fairseat_max_per_purchaser: int = 6
+    # Read-only membership API and FairSeat source. Requires reviewed pending 030/031.
+    membercore_enabled: bool = False
+    # GateSync is opt-in; keep the credential encryption key on the server only.
+    gatesync_enabled: bool = False
+    gatesync_credential_key: str = ""
     # Ticket payments are a second switch, also off by default.
     fairseat_payments_enabled: bool = False
     # Where the payment provider sends a ticket buyer back to. Blank = this API's own return route.

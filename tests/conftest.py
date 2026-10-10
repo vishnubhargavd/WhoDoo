@@ -98,8 +98,8 @@ async def world(db):
         outsider=person("Omar Outsider", "member", member=False),
     )
     await db.flush()
-    bake_sale = Event(id=uuid.uuid4(), club_id=club.id, name="Bake Sale", event_date=date(2026, 10, 3), lead_id=people.lead.id)
-    fest = Event(id=uuid.uuid4(), club_id=club.id, name="Tech Fest", event_date=date(2026, 9, 12), lead_id=people.lead2.id)
+    bake_sale = Event(id=uuid.uuid4(), club_id=club.id, name="Bake Sale", event_date=date(2026, 10, 3), lead_id=people.lead.id, status="published")
+    fest = Event(id=uuid.uuid4(), club_id=club.id, name="Tech Fest", event_date=date(2026, 9, 12), lead_id=people.lead2.id, status="published")
     db.add_all([bake_sale, fest])
     await db.commit()
     return SimpleNamespace(club=club, bake_sale=bake_sale, fest=fest, **vars(people))

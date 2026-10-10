@@ -445,13 +445,11 @@ def supabase_mode(monkeypatch):
 
 @pytest.fixture
 async def identity_column(db):
-    """What migration 030 adds, on the disposable test database only, for this test only."""
-    await db.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_user_id uuid UNIQUE"))
-    await db.commit()
+    """Exercise the actual pending 030 installed by the disposable schema fixture."""
+    shared_directory._auth_identity_ready = False
+    await shared_directory.check_auth_identity_column(db)
     yield
-    await db.rollback()
-    await db.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS auth_user_id"))
-    await db.commit()
+    shared_directory._auth_identity_ready = False
 
 
 async def link(db, user, auth_user_id: uuid.UUID | None = None) -> uuid.UUID:
@@ -467,7 +465,7 @@ def code(response) -> str:
 
 async def test_linked_user_signs_in_with_a_supabase_token(client, world, db, supabase_mode, identity_column):
     auth_id = await link(db, world.president)
-    response = await client.get("/api/v1/events", headers=supabase_mode(auth_id))
+    response = await client.get("/api/v1/events", headers=supabase_mode(auth_id), params={"scope": "all"})
     assert response.status_code == 200
     assert {e["name"] for e in response.json()} == {"Bake Sale", "Tech Fest"}
     response = await client.get("/api/v1/ledger/summary", headers=supabase_mode(auth_id))
@@ -503,7 +501,7 @@ async def test_role_and_club_come_from_the_database_not_the_token(client, world,
 
     response = await client.get("/api/v1/ledger/summary", headers=headers)
     assert (response.status_code, code(response)) == (403, "forbidden")  # still a plain member
-    response = await client.get("/api/v1/events", headers=headers)
+    response = await client.get("/api/v1/events", headers=headers, params={"scope": "all"})
     assert response.status_code == 200 and {e["club_id"] for e in response.json()} == {str(world.club.id)}
     response = await client.get(f"/api/v1/events/{other_event.id}", headers=headers)
     assert response.status_code == 404  # the other club stays invisible
@@ -525,21 +523,27 @@ async def test_unlinking_or_demoting_takes_effect_on_the_next_request(client, wo
 
 
 async def test_supabase_mode_fails_closed_without_migration_030(client, world, db, supabase_mode):
-    response = await client.get("/api/v1/events", headers=supabase_mode(world.president.id))
-    assert (response.status_code, code(response)) == (503, "auth_unavailable")
-    assert "auth_user_id" not in response.text and "migration" not in response.text
-    assert shared_directory._auth_identity_ready is False
+    await db.execute(text("ALTER TABLE users RENAME COLUMN auth_user_id TO unavailable_auth_user_id"))
+    await db.commit()
+    try:
+        response = await client.get("/api/v1/events", headers=supabase_mode(world.president.id))
+        assert (response.status_code, code(response)) == (503, "auth_unavailable")
+        assert "auth_user_id" not in response.text and "migration" not in response.text
+        assert shared_directory._auth_identity_ready is False
+    finally:
+        await db.execute(text("ALTER TABLE users RENAME COLUMN unavailable_auth_user_id TO auth_user_id"))
+        await db.commit()
 
 
 async def test_supabase_mode_fails_closed_if_auth_user_id_is_not_unique(client, world, db, supabase_mode):
-    await db.execute(text("ALTER TABLE users ADD COLUMN auth_user_id uuid"))
+    await db.execute(text("DROP INDEX public.users_auth_user_id_uq"))
     await db.commit()
     try:
         response = await client.get("/api/v1/events", headers=supabase_mode(uuid.uuid4()))
         assert (response.status_code, code(response)) == (503, "auth_unavailable")
     finally:
         await db.rollback()
-        await db.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS auth_user_id"))
+        await db.execute(text("CREATE UNIQUE INDEX users_auth_user_id_uq ON public.users (auth_user_id)"))
         await db.commit()
 
 

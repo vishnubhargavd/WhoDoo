@@ -269,6 +269,11 @@ BEGIN
        WHERE entity_id=m1 AND action='refunded_current_term_cancelled') THEN
     RAISE EXCEPTION 'Refund failed to cancel and audit the current paid term';
   END IF;
+  BEGIN
+    UPDATE public.memberships SET status='active' WHERE id=m1;
+    RAISE EXCEPTION 'Expected refunded membership reactivation to fail';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
 
   -- Complimentary activation is a distinct, audited waiver and has no fake dues.
   INSERT INTO public.memberships

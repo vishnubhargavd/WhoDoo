@@ -136,6 +136,10 @@ _membership_source: MembershipSource = NoMembershipRecords()
 
 
 def get_membership_source() -> MembershipSource:
+    if get_settings().membercore_enabled:
+        from app.services.membercore import PostgresMembershipSource
+
+        return PostgresMembershipSource()
     return _membership_source
 
 

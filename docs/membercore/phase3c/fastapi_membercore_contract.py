@@ -27,8 +27,9 @@ class MembershipSource(Protocol):
 
         Return `None` when no record exists. The returned Membership is the
         existing FairSeat type with status: str, club_id: str, starts_at_ms:
-        int, expires_at_ms: int, and discount_bps: int. A pending record must
-        remain pending/ineligible; never map it to active or trust browser data.
+        int, expires_at_ms: int, and discount_bps: int. Return None for a pending
+        record: the existing calculator accepts active/cancelled/expired only.
+        Never map pending to active or trust browser data.
         """
         ...
 

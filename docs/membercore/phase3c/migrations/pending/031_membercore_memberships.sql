@@ -18,7 +18,7 @@ BEGIN
 END
 $preflight$;
 
-CREATE SCHEMA membercore_internal;
+CREATE SCHEMA IF NOT EXISTS membercore_internal;
 REVOKE ALL ON SCHEMA membercore_internal FROM PUBLIC;
 
 CREATE TABLE public.membership_plans (
@@ -294,13 +294,20 @@ AS $function$
 DECLARE
   v_outcome text;
 BEGIN
+  -- All entitlement writes serialize on membership first, then dues. This also
+  -- prevents a refund from slipping between a grant check and its insertion.
+  PERFORM 1 FROM public.memberships AS m
+  WHERE m.id = NEW.membership_id AND m.club_id = NEW.club_id FOR UPDATE;
   IF NEW.source = 'paid_settlement' THEN
     SELECT r.outcome INTO v_outcome
     FROM public.membership_dues_reconciliations AS r
     WHERE r.id = NEW.reconciliation_id AND r.dues_id = NEW.dues_id
       AND r.club_id = NEW.club_id;
-    IF v_outcome IS DISTINCT FROM 'paid' THEN
-      RAISE EXCEPTION 'Paid activation requires a verified paid settlement for the same renewal'
+    IF v_outcome IS DISTINCT FROM 'paid' OR EXISTS (
+      SELECT 1 FROM public.membership_dues_reconciliations AS r
+      WHERE r.dues_id = NEW.dues_id AND r.club_id = NEW.club_id AND r.outcome = 'refunded'
+    ) THEN
+      RAISE EXCEPTION 'Paid activation requires an unrefunded verified settlement for the same renewal'
         USING ERRCODE = '23514';
     END IF;
   END IF;
@@ -337,6 +344,11 @@ BEGIN
        SELECT 1 FROM public.membership_activation_grants AS g
        WHERE g.renewal_id = v_renewal.id
          AND g.membership_id = NEW.id AND g.club_id = NEW.club_id
+         AND (g.source = 'complimentary_waiver' OR NOT EXISTS (
+           SELECT 1 FROM public.membership_dues_reconciliations AS refunded
+           WHERE refunded.dues_id = g.dues_id AND refunded.club_id = g.club_id
+             AND refunded.outcome = 'refunded'
+         ))
      ) THEN
     RAISE EXCEPTION 'Active membership requires the latest matching renewal and activation proof'
       USING ERRCODE = '23514';
@@ -349,6 +361,28 @@ CREATE TRIGGER membership_activation_required
   BEFORE INSERT OR UPDATE OF status, plan_id, starts_at, expires_at, discount_bps_snapshot
   ON public.memberships
   FOR EACH ROW EXECUTE FUNCTION membercore_internal.require_activation_before_active();
+
+CREATE FUNCTION membercore_internal.lock_reconciliation_membership()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $function$
+BEGIN
+  -- Acquire the same aggregate lock used by active updates and grant inserts
+  -- BEFORE inserting reconciliation evidence. Queries in the later trigger see
+  -- any committed competing activation/refund after this lock is acquired.
+  PERFORM m.id FROM public.memberships AS m
+  JOIN public.membership_dues AS d
+    ON d.membership_id = m.id AND d.club_id = m.club_id
+  WHERE d.id = NEW.dues_id AND d.club_id = NEW.club_id
+  FOR UPDATE OF m;
+  RETURN NEW;
+END
+$function$;
+REVOKE ALL ON FUNCTION membercore_internal.lock_reconciliation_membership() FROM PUBLIC;
+CREATE TRIGGER membership_reconciliation_lock
+  BEFORE INSERT ON public.membership_dues_reconciliations
+  FOR EACH ROW EXECUTE FUNCTION membercore_internal.lock_reconciliation_membership();
 
 CREATE FUNCTION membercore_internal.enforce_refund_and_revoke_current_term()
 RETURNS trigger

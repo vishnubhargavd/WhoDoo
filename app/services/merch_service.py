@@ -249,6 +249,8 @@ async def present_orders(session: AsyncSession, orders: list[MerchOrder]) -> lis
             currency=order.currency,
             stripe_checkout_session_id=order.stripe_checkout_session_id,
             stripe_payment_intent_id=order.stripe_payment_intent_id,
+            refund_status=order.refund_status,
+            refund_failure=order.refund_failure,
             event_id=order.event_id,
             items=[
                 OrderItemOut(
@@ -467,17 +469,18 @@ async def refund_unfilled_order(
 ) -> MerchOrder:
     """The buyer paid but the order cannot be filled (sold out, or closed meanwhile).
 
-    No stock was taken. The ledger shows the money arriving and going straight back, so it
-    agrees with the provider's records. The caller sends the refund through the provider.
+    No stock was taken. Record the income and refund obligation now; only confirmed
+    provider settlement creates the compensating ledger entry.
     """
     order.stripe_payment_intent_id = payment_intent_id
-    order.payment_status = "refunded"
+    order.payment_status = "paid"
     order.status = "cancelled"
+    order.refund_status = "required"
+    order.refund_reason = reason
     await session.flush()
     await _record_sale(session, order, payment_intent_id, actor_id)
-    await _record_refund(session, order, actor_id, f"Refund for order {order.order_number}: {reason}")
     audit_service.record(
-        session, club_id=order.club_id, actor_id=actor_id, action="merch.order_refunded_unfilled",
+        session, club_id=order.club_id, actor_id=actor_id, action="merch.refund_required_unfilled",
         entity_type="merch_order", entity_id=order.id,
         details={"payment_intent_id": payment_intent_id, "reason": reason},
     )
@@ -488,10 +491,12 @@ async def record_external_refund(session: AsyncSession, order: MerchOrder) -> Me
     """A paid order was refunded in full outside the app (Stripe Dashboard). Match it here."""
     if order.payment_status != "paid":
         return order
-    if order.status != "delivered":
+    if order.status not in ("delivered", "cancelled"):
         await _restock(session, order)
         order.status = "cancelled"
     order.payment_status = "refunded"
+    order.refund_status = "succeeded"
+    order.refund_failure = None
     await session.flush()
     await _record_refund(session, order, order.user_id, f"Refund issued by the payment provider for order {order.order_number}")
     audit_service.record(
@@ -525,8 +530,8 @@ async def update_status(
 ) -> tuple[MerchOrder, bool]:
     """Move an order along (packed, delivered) or cancel it.
 
-    Returns (order, refund_due). When a paid order is cancelled, stock goes back, a refund
-    entry is written, and `refund_due` tells the caller to return the money through the provider.
+    Returns (order, refund_due). Cancellation restocks once and persists the refund
+    obligation. The caller commits before asking the provider to refund.
     """
     order = await load_order(session, user.club_id, order_id, lock=True)
     if new_status not in ADMIN_MOVES.get(order.status, set()):
@@ -537,10 +542,8 @@ async def update_status(
     if new_status == "cancelled":
         if order.payment_status == "paid":
             await _restock(session, order)
-            await _record_refund(
-                session, order, user.id, f"Refund for cancelled order {order.order_number}", approved_by=user.id
-            )
-            order.payment_status = "refunded"
+            order.refund_status = "required"
+            order.refund_reason = "cancelled_by_finance_admin"
             refund_due = True
         else:
             order.payment_status = "failed"
@@ -549,7 +552,7 @@ async def update_status(
     audit_service.record(
         session, club_id=order.club_id, actor_id=user.id, action="merch.order_status_changed",
         entity_type="merch_order", entity_id=order.id,
-        details={"from": old_status, "to": new_status, "refunded": refund_due},
+        details={"from": old_status, "to": new_status, "refund_required": refund_due},
     )
     return order, refund_due
 

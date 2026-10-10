@@ -131,6 +131,58 @@ async def test_receipt_upload_rules(client, world, auth, submit):
     assert future.status_code == 422
 
 
+async def test_receipts_are_private_before_and_after_claim_submission(client, db, world, auth, monkeypatch):
+    import uuid
+    from app.models.shared import Club, User
+
+    monkeypatch.setattr(ocr_service, "read_receipt", lambda *args: ocr_service._fallback("ocr_failed"))
+    upload = await client.post(f"{API}/ocr", headers=auth(world.volunteer),
+                               files={"file": ("r.png", RECEIPT, "image/png")})
+    receipt = upload.json()
+    url = receipt["receipt_url"]
+    assert url.startswith(f"{API}/receipts/{world.club.id}/")
+    assert (await client.get(url)).status_code == 401
+    assert (await client.get(url, headers=auth(world.member))).status_code == 404
+    assert (await client.get(url, headers=auth(world.treasurer))).status_code == 404  # unattached upload is owner-only
+    own = await client.get(url, headers=auth(world.volunteer))
+    assert own.status_code == 200 and own.content == RECEIPT
+    assert own.headers["cache-control"] == "private, no-store"
+    assert own.headers["x-content-type-options"] == "nosniff"
+    legacy = url.replace(f"{API}/receipts/", "/uploads/receipts/")
+    assert (await client.get(legacy)).status_code == 404
+    claim = await client.post(API, headers=auth(world.volunteer), json={
+        "receipt_id": receipt["receipt_id"], "title": "Private receipt", "description": "Private description",
+        "category": "supplies", "amount": "100", "expense_date": "2026-10-03", "event_id": str(world.bake_sale.id),
+    })
+    assert claim.status_code == 201, claim.text
+    assert (await client.get(url, headers=auth(world.lead))).status_code == 200
+    assert (await client.get(url, headers=auth(world.treasurer))).status_code == 200
+    assert (await client.get(url, headers=auth(world.member))).status_code == 403
+    club = Club(id=uuid.uuid4(), name="Other Club")
+    db.add(club)
+    await db.flush()
+    stranger = User(id=uuid.uuid4(), club_id=club.id, full_name="Other Treasurer", email="other@test.invalid",
+                    role="treasurer", is_active_member=False)
+    db.add(stranger)
+    await db.commit()
+    assert (await client.get(url, headers=auth(stranger))).status_code == 404
+
+
+def test_storage_rejects_public_buckets_and_path_traversal(monkeypatch):
+    import uuid
+    from types import SimpleNamespace
+    from app.services import storage_service
+    from app.core.errors import AppError
+
+    storage = SimpleNamespace(get_bucket=lambda name: SimpleNamespace(public=True))
+    monkeypatch.setattr(storage_service, "get_supabase", lambda: SimpleNamespace(storage=storage))
+    with pytest.raises(AppError, match="private storage"):
+        storage_service.save_receipt(uuid.uuid4(), RECEIPT, ".png", "image/png")
+    with pytest.raises(AppError) as denied:
+        storage_service.read_receipt(uuid.uuid4(), "../../.env")
+    assert denied.value.status_code == 404
+
+
 # --- Approval workflow -------------------------------------------------------------
 
 

@@ -140,6 +140,8 @@ class OrderOut(BaseModel):
     currency: str = "INR"
     stripe_checkout_session_id: str | None
     stripe_payment_intent_id: str | None
+    refund_status: Literal['required', 'pending', 'failed', 'succeeded'] | None = None
+    refund_failure: str | None = None
     event_id: uuid.UUID | None
     items: list[OrderItemOut]
     created_at: datetime

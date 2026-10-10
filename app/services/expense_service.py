@@ -425,6 +425,7 @@ def _extras(claim: ExpenseClaim, user: CurrentUser, people: dict, events: dict, 
         return people[user_id].full_name if user_id in people else None
 
     return {
+        "receipt_url": storage_service.private_receipt_url(claim.receipt_url),
         "reviewer_note": request.comment if request else None,
         "reviewer_name": name(request.approver_id) if request else None,
         "submitted_by_name": name(claim.submitted_by),

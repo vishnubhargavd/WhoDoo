@@ -1,7 +1,7 @@
 """Payments for merchandise orders, behind one provider interface.
 
 `StripePaymentProvider` uses Stripe Checkout in test mode. `MockPaymentProvider` is a
-Stripe-compatible stand-in used when no test key is configured: the same session ids,
+Stripe-compatible stand-in enabled explicitly in a local demo: the same session ids,
 the same webhook signatures, the same session -> verify -> ledger flow, just no real
 money. Business logic below never checks which provider is active.
 
@@ -57,6 +57,7 @@ class CheckoutRequest:
     cancel_url: str
     reference: str | None = None    # shown as the client reference; defaults to the merch order id
     expires_at: int | None = None   # Unix seconds; the provider's default when None
+    idempotency_key: str | None = None
 
 
 @dataclass
@@ -96,7 +97,7 @@ class InvalidWebhookSignature(Exception):
 
 
 class ProviderRejectedKey(Exception):
-    """The provider refused our credentials. The flow falls back to the mock provider."""
+    """The provider refused our credentials. Checkout must fail closed."""
 
 
 def _provider_error(exc: Exception) -> AppError:
@@ -171,6 +172,7 @@ class StripePaymentProvider:
         try:
             raw = stripe.checkout.Session.create(
                 api_key=self._secret_key,
+                **({"idempotency_key": request.idempotency_key} if request.idempotency_key else {}),
                 mode="payment",
                 line_items=[
                     {
@@ -238,12 +240,15 @@ class MockPaymentProvider:
     def __init__(self, webhook_secret: str):
         self.webhook_secret = webhook_secret
         self._sessions: dict[str, CheckoutSession] = {}
+        self._checkout_keys: dict[str, str] = {}
         self.refunds: dict[str, tuple[str, int]] = {}   # idempotency key -> (payment intent, paise)
         self.refund_results: dict[str, RefundResult] = {}
         # Tests set this to "pending" or "failed" to play a refund that does not settle at once.
         self.next_refund_status = "succeeded"
 
     def create_checkout_session(self, request: CheckoutRequest) -> CheckoutSession:
+        if request.idempotency_key in self._checkout_keys:
+            return self._sessions[self._checkout_keys[request.idempotency_key]]
         session = CheckoutSession(
             id=f"cs_mock_{secrets.token_hex(12)}",
             url=None,
@@ -255,6 +260,8 @@ class MockPaymentProvider:
             metadata=dict(request.metadata),
         )
         self._sessions[session.id] = session
+        if request.idempotency_key:
+            self._checkout_keys[request.idempotency_key] = session.id
         return session
 
     def verify_payment(self, session_id: str) -> CheckoutSession | None:
@@ -296,23 +303,19 @@ def _mock_provider() -> MockPaymentProvider:
 @lru_cache
 def get_provider() -> PaymentProvider:
     settings = get_settings()
-    if settings.use_stripe:
+    if settings.payment_provider == "mock":
+        if not (settings.demo_auth and settings.database_is_local):
+            raise AppError(503, "payments_unavailable", "Mock payments require an explicit local demo.")
+        return _mock_provider()
+    if settings.payment_provider in ("stripe", "auto") and settings.use_stripe:
         return StripePaymentProvider(settings.stripe_secret_key.strip(), settings.stripe_webhook_secret.strip())
-    if settings.payment_provider != "mock":
-        key = settings.stripe_secret_key.strip()
-        if key.startswith(("sk_live_", "rk_live_")):
-            logger.warning("A live Stripe key is set. This app only takes test-mode keys; using mock payments.")
-        elif settings.payment_provider == "stripe":
-            logger.warning("PAYMENT_PROVIDER=stripe but STRIPE_SECRET_KEY is not a test key; using mock payments.")
-    return _mock_provider()
+    raise AppError(503, "payments_unavailable", "A supported payment provider is not configured.")
 
 
 def _fall_back_to_mock(reason: str) -> PaymentProvider:
-    """Stripe refused the key. Use mock payments until the server is restarted with a working key."""
-    logger.error("Stripe rejected the configured key (%s). Using mock payments until restart.", reason)
-    get_provider.cache_clear()
-    get_settings().payment_provider = "mock"
-    return get_provider()
+    """Compatibility for existing callers: a provider failure never switches to mock."""
+    logger.error("Payment provider rejected its configured credentials.")
+    raise AppError(503, "payments_unavailable", "The payment provider is unavailable. Contact the treasurer.")
 
 
 # --- Flow ------------------------------------------------------------------------------
@@ -388,20 +391,31 @@ async def create_checkout_session(
     if order.status != "created":
         raise conflict("order_closed", f"This order is {order.status} and can no longer be paid")
     await merch_service.check_stock(session, order)
-
+    previous_session_id = order.stripe_checkout_session_id
+    request = _checkout_request(order)
+    request.idempotency_key = f"merch:{order.id}:checkout:{previous_session_id or 'first'}"
+    await session.commit()  # Do not keep the order lock during provider I/O.
     current = None
-    if order.stripe_checkout_session_id:
-        current = await run_in_threadpool(provider.verify_payment, order.stripe_checkout_session_id)
+    if previous_session_id:
+        current = await run_in_threadpool(provider.verify_payment, previous_session_id)
+    created = False
     if current is None or (current.status != "open" and current.payment_status != "paid"):
         # No session yet, or the last one expired: open a fresh one for the server's amount.
-        request = _checkout_request(order)
         try:
             current = await run_in_threadpool(provider.create_checkout_session, request)
         except ProviderRejectedKey as exc:
             provider = _fall_back_to_mock(str(exc))
             current = await run_in_threadpool(provider.create_checkout_session, request)
-        if current.amount_total != _paise(order):
-            raise AppError(502, "payment_provider_error", "The payment service returned the wrong amount")
+        created = True
+    order = await merch_service.load_order(session, user.club_id, merch_order_id, lock=True)
+    if order.status != "created" or order.payment_status == "paid":
+        raise conflict("order_closed", "This order changed while checkout was opening. Reload the order.")
+    if order.stripe_checkout_session_id not in (previous_session_id, current.id):
+        raise conflict("checkout_changed", "Another checkout was opened. Reload the order.")
+    if (current.amount_total != _paise(order) or current.currency != order.currency.lower()
+            or _order_id_from(current.metadata) != order.id):
+        raise AppError(502, "payment_provider_error", "The payment service returned mismatched checkout details")
+    if created:
         order.stripe_checkout_session_id = current.id
         order.payment_status = "pending"
         await session.flush()
@@ -432,14 +446,8 @@ async def create_checkout_session(
 async def _refund_unfillable(
     session: AsyncSession, order: MerchOrder, payment_intent_id: str, actor_id: uuid.UUID, reason: str
 ) -> None:
-    """The buyer was charged for an order we cannot fill: cancel it and send the money back.
-
-    The Stripe refund runs before the caller commits. If it fails, everything here is rolled
-    back and the next verification or webhook tries again; the idempotency key shared with
-    Stripe means the buyer is never refunded twice.
-    """
+    """Persist a refund obligation only. The caller releases locks before contacting Stripe."""
     await merch_service.refund_unfilled_order(session, order, payment_intent_id, actor_id=actor_id, reason=reason)
-    await run_in_threadpool(get_provider().refund, payment_intent_id, _paise(order), f"{payment_intent_id}:refund")
 
 
 async def _settle(
@@ -447,11 +455,13 @@ async def _settle(
 ) -> PaymentOutcome:
     """Record a payment the provider has confirmed. `order` is locked. Safe to repeat."""
     sold_out = conflict(
-        "insufficient_stock", "This item sold out before your payment went through. You have been refunded in full."
+        "insufficient_stock", "This item sold out before payment completed. A full refund is required; see the order for its status."
     )
     if order.payment_status == "paid":
         if order.stripe_payment_intent_id != payment_intent_id:
             return PaymentOutcome(order, conflict("already_paid", "This order was already paid with another payment"))
+        if order.refund_status:
+            return PaymentOutcome(order, conflict("refund_required", "This order was cancelled. Check its refund status."))
         return PaymentOutcome(order)
     if order.payment_status == "refunded":
         closed = sold_out if order.stripe_payment_intent_id == payment_intent_id else None
@@ -459,7 +469,7 @@ async def _settle(
     if order.status != "created":
         # Money arrived for an order that was closed in the meantime: send it back.
         await _refund_unfillable(session, order, payment_intent_id, actor_id, f"order was {order.status}")
-        return PaymentOutcome(order, conflict("order_closed", "This order was cancelled. You have been refunded in full."))
+        return PaymentOutcome(order, conflict("order_closed", "This order was cancelled. A full refund is required; check its status."))
     try:
         await merch_service.fulfil_paid_order(session, order, payment_intent_id, actor_id=actor_id)
         return PaymentOutcome(order)
@@ -496,7 +506,75 @@ async def verify_payment(session: AsyncSession, user: CurrentUser, session_id: s
         return PaymentOutcome(
             order, bad_request("amount_mismatch", "The amount paid does not match this order. Contact the treasurer.")
         )
-    return await _settle(session, order, checkout.payment_intent_id, user.id)
+    outcome = await _settle(session, order, checkout.payment_intent_id, user.id)
+    if outcome.order.refund_status in ("required", "pending"):
+        await session.commit()
+        await process_refund(session, order.id)
+    return outcome
+
+
+async def _apply_refund_result(
+    session: AsyncSession, order_id: uuid.UUID, result: RefundResult, *, attempt: int | None = None
+) -> str | None:
+    order = await _locked_order(session, order_id)
+    if order is None or order.refund_status is None:
+        return None
+    if order.refund_status == "succeeded":
+        return "succeeded"
+    # A delayed result from an older failed attempt must not overwrite a newer attempt.
+    if attempt is not None and attempt != order.refund_attempts:
+        return order.refund_status
+    if result.id:
+        order.stripe_refund_id = result.id
+    if result.status == "succeeded":
+        await merch_service.record_external_refund(session, order)
+    elif result.status == "failed":
+        order.refund_status = "failed"
+        order.refund_failure = (result.failure_reason or "The provider rejected the refund.")[:500]
+    else:
+        order.refund_status = "pending"
+        order.refund_failure = (result.failure_reason or "Awaiting provider confirmation.")[:500]
+    audit_service.record(
+        session, club_id=order.club_id, actor_id=None, action="merch.refund_" + order.refund_status,
+        entity_type="merch_order", entity_id=order.id,
+        details={"refund_id": order.stripe_refund_id, "attempt": order.refund_attempts},
+    )
+    await session.flush()
+    return order.refund_status
+
+
+async def process_refund(session: AsyncSession, order_id: uuid.UUID) -> str | None:
+    """Short transaction -> provider call -> short transaction. Never hold locks on the network.
+
+    Transport failures are ambiguous, so keep the attempt pending and reuse its provider
+    idempotency key. Only an explicit provider failure permits a fresh retry key.
+    """
+    order = await _locked_order(session, order_id)
+    if order is None:
+        await session.rollback()
+        return None
+    status = order.refund_status
+    if status not in ("required", "pending", "failed"):
+        await session.rollback()
+        return status
+    if status != "pending":
+        order.refund_attempts += 1
+        order.stripe_refund_id = None
+    order.refund_status = "pending"
+    order.refund_failure = None
+    intent, paise, attempt = order.stripe_payment_intent_id, _paise(order), order.refund_attempts
+    await session.commit()
+    key = f"{intent}:refund" if attempt == 1 else f"{intent}:refund:{attempt}"
+    try:
+        result = await run_in_threadpool(get_provider().refund, intent, paise, key)
+    except Exception:
+        # The provider may have accepted the operation before a timeout. Do not create
+        # a new attempt or claim failure/success without provider confirmation.
+        logger.warning("Merchandise refund confirmation unavailable for order %s", order_id)
+        result = RefundResult(None, "pending", "Provider confirmation unavailable. Retry safely or contact the treasurer.")
+    status = await _apply_refund_result(session, order_id, result, attempt=attempt)
+    await session.commit()
+    return status
 
 
 # --- Webhook ---------------------------------------------------------------------------
@@ -584,6 +662,21 @@ async def handle_webhook(session: AsyncSession, body: bytes, signature: str) -> 
         order, status, detail = await _on_failed(session, _order_id_from(data.get("metadata")))
     elif event.type == "charge.refunded":
         order, status, detail = await _on_refunded(session, data)
+    elif event.type in ("refund.updated", "refund.failed", "charge.refund.updated"):
+        order_id = await session.scalar(select(MerchOrder.id).where(MerchOrder.stripe_payment_intent_id == intent))
+        order = await _locked_order(session, order_id) if order_id else None
+        status, detail = "ignored", "Unknown or mismatched refund"
+        if (order is not None and data.get("amount") == _paise(order)
+                and data.get("currency") == order.currency.lower()
+                and (order.stripe_refund_id is None or order.stripe_refund_id == data.get("id"))):
+            reported = "failed" if event.type == "refund.failed" else data.get("status")
+            if reported == "succeeded" and order.refund_status is None:
+                await merch_service.record_external_refund(session, order)
+                status, detail = "processed", "Order refunded"
+            elif order.refund_status is not None:
+                result = RefundResult(data.get("id"), reported, data.get("failure_reason"))
+                detail = f"Refund {await _apply_refund_result(session, order.id, result)}"
+                status = "processed"
     else:
         order, status, detail = None, "ignored", f"Unhandled event {event.type}"
 
@@ -593,6 +686,10 @@ async def handle_webhook(session: AsyncSession, body: bytes, signature: str) -> 
     record.outcome = status
     record.detail = detail
     await session.flush()
+    if order is not None and order.refund_status == "required":
+        order_id = order.id
+        await session.commit()  # claim + refund obligation durable; release all locks first
+        await process_refund(session, order_id)
     return WebhookAck(status=status, detail=detail)
 
 

@@ -35,9 +35,12 @@ BEGIN
 
   IF to_regclass('public.users_auth_user_id_uq') IS NOT NULL
      AND NOT EXISTS (
-       SELECT 1 FROM pg_indexes
-       WHERE schemaname='public' AND indexname='users_auth_user_id_uq'
-         AND indexdef ILIKE 'CREATE UNIQUE INDEX%ON public.users USING btree (auth_user_id)%WHERE (auth_user_id IS NOT NULL)'
+       SELECT 1 FROM pg_index i
+       JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attname = 'auth_user_id'
+       WHERE i.indexrelid = to_regclass('public.users_auth_user_id_uq')
+         AND i.indrelid = 'public.users'::regclass AND i.indisunique
+         AND i.indisvalid AND i.indnkeyatts = 1 AND i.indkey[0] = a.attnum
+         AND i.indpred IS NULL AND i.indexprs IS NULL
      ) THEN
     RAISE EXCEPTION 'Index name public.users_auth_user_id_uq already exists with an unexpected definition';
   END IF;
@@ -54,7 +57,9 @@ $preflight$;
 
 ALTER TABLE public.users ADD COLUMN IF NOT EXISTS auth_user_id uuid NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS users_auth_user_id_uq
-  ON public.users (auth_user_id) WHERE auth_user_id IS NOT NULL;
+  ON public.users (auth_user_id);
+-- Ordinary UNIQUE allows multiple NULL mappings and matches the existing
+-- FastAPI identity bridge's non-partial unique-index catalog contract.
 -- Supports club-consistent composite FKs without changing the existing PK or IDs.
 CREATE UNIQUE INDEX IF NOT EXISTS users_id_club_id_uq
   ON public.users (id, club_id);

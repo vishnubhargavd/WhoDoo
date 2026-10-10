@@ -52,7 +52,7 @@ async def test_design_assets_exist_and_are_referenced(client):
     html = (await client.get("/")).text
     for path in re.findall(r'(?:src|href)="(/static/[^"]+)"', html):
         assert (await client.get(path)).status_code == 200, path
-    css = (STATIC / "styles.css").read_text()
+    css = (STATIC / "styles.css").read_text(encoding="utf-8")
     for token in ("--ink: #080808", "--cream: #f4efdf", "--butter: #f4f068", "--coral: #f04b37", "--mint: #8de8bd", "--cobalt: #2858bd"):
         assert token in css                                       # the v0 palette, unchanged
     assert "prefers-reduced-motion: reduce" in css

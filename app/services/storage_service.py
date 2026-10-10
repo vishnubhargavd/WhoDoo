@@ -1,15 +1,32 @@
 """Receipt file storage: Supabase Storage when configured, local disk otherwise."""
 
 import io
+import re
 import uuid
 from pathlib import Path
 
 from app.core.config import get_settings
-from app.core.errors import AppError, bad_request
+from app.core.errors import AppError, bad_request, not_found
 from app.db.supabase_client import get_supabase
 
 MAX_RECEIPT_BYTES = 8 * 1024 * 1024
 IMAGE_FORMATS = {"PNG": (".png", "image/png"), "JPEG": (".jpg", "image/jpeg"), "WEBP": (".webp", "image/webp")}
+RECEIPT_ROUTE = "/api/v1/expenses/receipts/"
+
+
+def private_receipt_url(url: str) -> str:
+    """Existing local files stay usable through the authenticated route."""
+    if url.startswith("/uploads/receipts/"):
+        return RECEIPT_ROUTE + url.removeprefix("/uploads/receipts/")
+    return url
+
+
+def _private_bucket(supabase):
+    name = get_settings().supabase_storage_bucket
+    info = supabase.storage.get_bucket(name)
+    if getattr(info, "public", None) is not False:
+        raise AppError(503, "receipt_storage_unavailable", "Receipts require a private storage bucket.")
+    return supabase.storage.from_(name)
 
 
 def identify_receipt(data: bytes) -> tuple[str, str]:
@@ -43,11 +60,25 @@ def save_receipt(club_id: uuid.UUID, data: bytes, extension: str, content_type: 
 
     supabase = get_supabase()
     if supabase is not None:
-        bucket = supabase.storage.from_(settings.supabase_storage_bucket)
+        bucket = _private_bucket(supabase)
         bucket.upload(key, data, {"content-type": content_type})
-        return bucket.get_public_url(key)
+    else:
+        path = Path(settings.upload_dir) / "receipts" / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    return RECEIPT_ROUTE + key
 
-    path = Path(settings.upload_dir) / "receipts" / key
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
-    return f"/uploads/receipts/{key}"
+
+def read_receipt(club_id: uuid.UUID, filename: str) -> bytes:
+    """Caller must authorize the stored receipt row before calling. Never fetch arbitrary URLs."""
+    if re.fullmatch(r"[a-f0-9]{32}\.(?:png|jpg|webp|pdf)", filename) is None:
+        raise not_found("Receipt")
+    key = f"{club_id}/{filename}"
+    supabase = get_supabase()
+    if supabase is not None:
+        return _private_bucket(supabase).download(key)
+    root = (Path(get_settings().upload_dir) / "receipts").resolve()
+    path = (root / key).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise not_found("Receipt")
+    return path.read_bytes()

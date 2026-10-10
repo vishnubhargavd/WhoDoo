@@ -6,7 +6,9 @@ from app.api.v1 import (
     expenses,
     fairseat,
     fairseat_payments,
+    gatesync,
     ledger,
+    membercore,
     merch,
     payments,
     tasks,
@@ -26,3 +28,6 @@ api_router.include_router(fairseat.router)
 api_router.include_router(event_tickets.router)
 api_router.include_router(event_tickets.discovery)
 api_router.include_router(fairseat_payments.router)
+api_router.include_router(gatesync.router)
+api_router.include_router(membercore.router)
+

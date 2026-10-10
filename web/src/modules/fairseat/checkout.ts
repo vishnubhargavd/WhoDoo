@@ -36,11 +36,12 @@ export async function quoteForAccount(auth: AuthPort | null, port: QuoteReadPort
 
 export const disconnectedResult: BookingApiResult = { ok: false, error: 'not_configured', message: 'Ticket reservations are not connected yet.' };
 /** Server boundary: verified Auth identity is necessary but does not replace the app-user bridge. */
-export async function reserveForAccount(auth: AuthPort | null, config: BookingApiConfig | null, command: unknown): Promise<BookingApiResult> {
+export interface ReservationPort { reserve(command: unknown): Promise<BookingApiResult> }
+export async function reserveForAccount(auth: AuthPort | null, config: BookingApiConfig | ReservationPort | null, command: unknown): Promise<BookingApiResult> {
   const account = await verifyAccount(auth);
   if (account.status !== 'authenticated') return { ok: false, error: 'not_authenticated', message: 'Sign in again before booking.' };
   if (!config) return disconnectedResult;
-  return createBookingApi(config).reserve(command);
+  return 'reserve' in config ? config.reserve(command) : createBookingApi(config).reserve(command);
 }
 export function bookingLoginDestination(): string { return '/login?next=%2Fbookings'; }
 /** UI convenience only. Backend must enforce purchaser-scoped idempotency atomically. */

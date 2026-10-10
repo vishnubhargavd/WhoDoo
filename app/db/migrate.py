@@ -12,7 +12,10 @@ async def run_migrations(dsn: str, *, reset: bool = False) -> list[str]:
     conn = await asyncpg.connect(dsn)
     try:
         if reset:
-            await conn.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+            db_name = await conn.fetchval("SELECT current_database()")
+            if "test" not in db_name:
+                raise RuntimeError(f"Refusing to reset non-test database: {db_name}")
+            await conn.execute("DROP SCHEMA IF EXISTS membercore_internal CASCADE; DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
         await conn.execute(
             "CREATE TABLE IF NOT EXISTS schema_migrations ("
             "name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"

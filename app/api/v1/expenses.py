@@ -1,10 +1,14 @@
 import uuid
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db, require_approver, require_finance_admin
-from app.core.errors import AppError
+from app.core.errors import AppError, not_found
+from app.models.expense import ReceiptUpload
 from app.schemas.expense import (
     ApprovalQueue,
     ApproveBody,
@@ -20,6 +24,35 @@ from app.schemas.expense import (
 from app.services import expense_service, storage_service
 
 router = APIRouter(prefix="/expenses", tags=["Snap-to-Reimburse"])
+
+
+@router.get("/receipts/{club_id}/{filename}")
+async def download_receipt(
+    club_id: uuid.UUID, filename: str,
+    user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    if club_id != user.club_id:
+        raise not_found("Receipt")
+    key = f"{club_id}/{filename}"
+    upload = await db.scalar(select(ReceiptUpload).where(
+        ReceiptUpload.club_id == user.club_id,
+        ReceiptUpload.receipt_url.in_((storage_service.RECEIPT_ROUTE + key, "/uploads/receipts/" + key)),
+    ))
+    if upload is None:
+        raise not_found("Receipt")
+    if upload.uploaded_by != user.id:
+        if upload.expense_claim_id is None:
+            raise not_found("Receipt")
+        # Reuse the claim's existing approver, owner and club authorization.
+        await expense_service.get_claim_detail(db, user, upload.expense_claim_id)
+    content_type = upload.content_type
+    await db.commit()  # Finish database work before remote storage I/O.
+    data = await run_in_threadpool(storage_service.read_receipt, club_id, filename)
+    return Response(data, media_type=content_type, headers={
+        "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Content-Disposition": f'inline; filename="{filename}"',
+    })
 
 
 @router.post("/ocr", response_model=OcrResponse)

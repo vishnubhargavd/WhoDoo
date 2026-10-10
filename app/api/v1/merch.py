@@ -1,7 +1,6 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db, require_finance_admin
@@ -116,13 +115,29 @@ async def update_order_status(
 ) -> OrderOut:
     """Mark an order packed or delivered, or cancel it. Cancelling a paid order restocks and refunds it."""
     order, refund_due = await merch_service.update_status(db, user, order_id, body.status)
-    if refund_due:
-        # Refund at the provider before committing: if it fails, the cancellation is rolled back.
-        await run_in_threadpool(
-            payment_service.get_provider().refund,
-            order.stripe_payment_intent_id,
-            int(order.total_amount * 100),
-            f"{order.stripe_payment_intent_id}:refund",
-        )
     await db.commit()
+    if refund_due:
+        await payment_service.process_refund(db, order_id)
+    return await merch_service.get_order(db, user, order_id)
+
+
+@router.post("/orders/{order_id}/refund/retry", response_model=OrderOut)
+async def retry_order_refund(
+    order_id: uuid.UUID,
+    user: CurrentUser = Depends(require_finance_admin),
+    db: AsyncSession = Depends(get_db),
+) -> OrderOut:
+    """Retry an owed refund for this club, reusing the key when the outcome is uncertain."""
+    from app.core.errors import conflict
+    from app.services import audit_service
+
+    order = await merch_service.load_order(db, user.club_id, order_id, lock=True)
+    if order.refund_status not in ("required", "pending", "failed"):
+        raise conflict("no_refund_due", "This order has no outstanding refund.")
+    audit_service.record(
+        db, club_id=user.club_id, actor_id=user.id, action="merch.refund_retry",
+        entity_type="merch_order", entity_id=order_id, details={"from": order.refund_status},
+    )
+    await db.commit()
+    await payment_service.process_refund(db, order_id)
     return await merch_service.get_order(db, user, order_id)

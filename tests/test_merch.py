@@ -10,6 +10,7 @@ import stripe
 from sqlalchemy import func, select
 
 from app.core.config import get_settings
+from app.core.errors import AppError
 from app.models.ledger import LedgerEntry
 from app.models.merch import PaymentEvent, ProductVariant
 from app.services import payment_service
@@ -670,13 +671,17 @@ async def test_stripe_refunds_the_payment_intent_when_stock_ran_out(client, db, 
     assert await _balance(client, auth, world) == 899.0
 
 
-async def test_rejected_stripe_key_falls_back_to_mock(client, db, world, auth, hoodie, checkout, pay, stripe_mode):
+async def test_rejected_stripe_key_fails_closed(client, db, world, auth, hoodie, stripe_mode):
     stripe_mode.reject_key = True
-    order, payment = await checkout(world.member, hoodie["m"])
-    assert (payment["provider"], payment["is_mock"]) == ("mock", True)
-    assert payment["session_id"].startswith("cs_mock_")
-    assert (await pay(world.member, payment)).status_code == 200
-    assert await _stock(db, hoodie["m"]) == 9 and len(await _merch_entries(db)) == 1
+    order = await client.post(f"{MERCH}/orders", headers=auth(world.member),
+                              json={"items": [{"variant_id": hoodie["m"]["id"]}]})
+    result = await client.post(f"{PAY}/stripe/create-checkout-session", headers=auth(world.member),
+                               json={"merch_order_id": order.json()["id"]})
+    assert result.status_code == 503
+    assert result.json()["error"]["code"] == "payments_unavailable"
+    assert get_settings().payment_provider == "stripe"
+    assert payment_service.get_provider().is_mock is False
+    assert await _stock(db, hoodie["m"]) == 10 and await _merch_entries(db) == []
 
 
 def test_only_test_mode_keys_select_stripe(monkeypatch):
@@ -687,13 +692,118 @@ def test_only_test_mode_keys_select_stripe(monkeypatch):
         monkeypatch.setattr(settings, "stripe_secret_key", key)
         payment_service.get_provider.cache_clear()
         assert settings.use_stripe is expected, key
-        assert payment_service.get_provider().is_mock is not expected, key
+        if expected:
+            assert payment_service.get_provider().is_mock is False
+        else:
+            with pytest.raises(AppError, match="configured"):
+                payment_service.get_provider()
     monkeypatch.setattr(settings, "payment_provider", "mock")
     monkeypatch.setattr(settings, "stripe_secret_key", "sk_test_abc")
     payment_service.get_provider.cache_clear()
     assert payment_service.get_provider().is_mock is True
     monkeypatch.undo()
     payment_service.get_provider.cache_clear()
+
+
+@pytest.mark.parametrize("state", ["pending", "failed"])
+async def test_merch_refunds_require_provider_settlement(client, db, world, auth, hoodie, checkout, pay, monkeypatch, state):
+    order, payment = await checkout(world.member, hoodie["m"])
+    await pay(world.member, payment)
+    provider = payment_service.get_provider()
+    monkeypatch.setattr(provider, "next_refund_status", state)
+    response = await client.post(f"{MERCH}/orders/{order['id']}/status", headers=auth(world.treasurer),
+                                 json={"status": "cancelled"})
+    body = response.json()
+    assert response.status_code == 200, body
+    assert (body["status"], body["payment_status"], body["refund_status"]) == ("cancelled", "paid", state)
+    assert await _stock(db, hoodie["m"]) == 10
+    assert [e.entry_type for e in await _merch_entries(db)] == ["income"]
+    assert await _balance(client, auth, world) == 799.0
+    intent = body["stripe_payment_intent_id"]
+    if state == "pending":
+        refund = provider.refund_results[f"{intent}:refund"]
+        for event_id in ("evt_merch_refund_settled", "evt_merch_refund_settled_again"):
+            payload, headers = _event(event_id, "refund.updated", {
+                "id": refund.id, "payment_intent": intent, "status": "succeeded", "amount": 79900, "currency": "inr"})
+            assert (await client.post(f"{PAY}/stripe/webhook", content=payload, headers=headers)).status_code == 200
+    else:
+        monkeypatch.setattr(provider, "next_refund_status", "succeeded")
+        denied = await client.post(f"{MERCH}/orders/{order['id']}/refund/retry", headers=auth(world.member))
+        assert denied.status_code == 403
+        retried = await client.post(f"{MERCH}/orders/{order['id']}/refund/retry", headers=auth(world.treasurer))
+        assert retried.status_code == 200 and retried.json()["refund_status"] == "succeeded"
+    assert await _stock(db, hoodie["m"]) == 10  # no second restock
+    assert [e.entry_type for e in await _merch_entries(db)] == ["income", "refund"]
+    assert await _balance(client, auth, world) == 0.0
+
+
+async def test_merch_ambiguous_refund_reuses_key_and_releases_locks(client, db, world, auth, hoodie, checkout, pay, monkeypatch):
+    import uuid
+    from app.db.database import SessionLocal
+    from app.models.merch import MerchOrder
+
+    order, payment = await checkout(world.member, hoodie["m"])
+    await pay(world.member, payment)
+    provider = payment_service.get_provider()
+    refund = provider.refund
+    keys = []
+    def interrupted(intent, paise, key):
+        keys.append(key)
+        result = refund(intent, paise, key)
+        if len(keys) == 1:
+            raise TimeoutError("response lost after provider accepted refund")
+        return result
+    monkeypatch.setattr(provider, "refund", interrupted)
+    run = payment_service.run_in_threadpool
+    async def check_unlocked(func, *args):
+        if func is interrupted:
+            async with SessionLocal() as probe:
+                await probe.scalar(select(MerchOrder).where(MerchOrder.id == uuid.UUID(order["id"]))
+                                   .with_for_update(nowait=True))
+        return await run(func, *args)
+    monkeypatch.setattr(payment_service, "run_in_threadpool", check_unlocked)
+    cancelled = await client.post(f"{MERCH}/orders/{order['id']}/status", headers=auth(world.treasurer),
+                                  json={"status": "cancelled"})
+    assert (cancelled.json()["payment_status"], cancelled.json()["refund_status"]) == ("paid", "pending")
+    assert [e.entry_type for e in await _merch_entries(db)] == ["income"]
+    retried = await client.post(f"{MERCH}/orders/{order['id']}/refund/retry", headers=auth(world.treasurer))
+    assert retried.json()["payment_status"] == "refunded"
+    assert len(keys) == 2 and keys[0] == keys[1]
+    assert [e.entry_type for e in await _merch_entries(db)] == ["income", "refund"]
+
+
+async def test_sold_out_order_keeps_refund_pending_without_phantom_accounting(client, db, world, auth, hoodie, checkout, pay, monkeypatch):
+    _, first = await checkout(world.member, hoodie["xxl"])
+    late, second = await checkout(world.outsider, hoodie["xxl"])
+    await pay(world.member, first)
+    monkeypatch.setattr(payment_service.get_provider(), "next_refund_status", "pending")
+    result = await pay(world.outsider, second)
+    assert result.status_code == 409
+    assert "refunded in full" not in result.text
+    saved = (await client.get(f"{MERCH}/orders/{late['id']}", headers=auth(world.outsider))).json()
+    assert (saved["status"], saved["payment_status"], saved["refund_status"]) == ("cancelled", "paid", "pending")
+    assert await _stock(db, hoodie["xxl"]) == 0
+    assert [e.entry_type for e in await _merch_entries(db)] == ["income", "income"]
+
+
+@pytest.mark.parametrize("provider,demo,url", [
+    ("auto", True, "postgresql://localhost/whodoo_test"),
+    ("mock", False, "postgresql://localhost/whodoo_test"),
+    ("mock", True, "postgresql://remote.invalid/whodoo_test"),
+])
+def test_mock_requires_explicit_local_demo(monkeypatch, provider, demo, url):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "payment_provider", provider)
+    monkeypatch.setattr(settings, "demo_auth", demo)
+    monkeypatch.setattr(settings, "database_url", url)
+    monkeypatch.setattr(settings, "stripe_secret_key", "")
+    payment_service.get_provider.cache_clear()
+    try:
+        with pytest.raises(AppError) as caught:
+            payment_service.get_provider()
+        assert caught.value.status_code == 503
+    finally:
+        payment_service.get_provider.cache_clear()
 
 
 # --- Several items in one order: titles, line prices and the total -----------------------------

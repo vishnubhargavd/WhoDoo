@@ -72,6 +72,6 @@ def test_fixture_is_what_the_typescript_source_produces_today(tmp_path):
             [node, "--experimental-strip-types", "--no-warnings", "scripts/make_ticket_discount_vectors.mjs"],
             cwd=ROOT, check=True, capture_output=True,
         )
-        assert FIXTURE.read_bytes() == before, "ticket-discount.ts changed: run `make fairseat-vectors` and review"
+        assert FIXTURE.read_bytes().replace(b"\r\n", b"\n") == before.replace(b"\r\n", b"\n"), "ticket-discount.ts changed: run `make fairseat-vectors` and review"
     finally:
         FIXTURE.write_bytes(before)
