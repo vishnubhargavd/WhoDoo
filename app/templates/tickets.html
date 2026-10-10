@@ -29,7 +29,12 @@
 
 {% for event in events %}
 <div class="card">
-  <h2>{{ event.name }} <span class="badge {{ {'open': 'paid', 'not_open': 'pending', 'closed': 'cancelled'}[event.sale_state] }}">{{ {"open": "On sale", "not_open": "Not open yet", "closed": "Sales closed"}[event.sale_state] }}</span></h2>
+  {% set left = event.categories | selectattr("seats_remaining", "ne", none) | sum(attribute="seats_remaining") %}
+  {% set total = event.categories | sum(attribute="capacity") %}
+  {% set event_level, event_message = ticket_level(left, total) %}
+  {% set sold_out = event.sale_state == "open" and event_level == "sold_out" %}
+  <h2>{{ event.name }} <span class="badge {{ 'failed' if sold_out else {'open': 'paid', 'not_open': 'pending', 'closed': 'cancelled'}[event.sale_state] }}">{{ "SOLD OUT" if sold_out else {"open": "On sale", "not_open": "Not open yet", "closed": "REGISTRATION CLOSED"}[event.sale_state] }}</span></h2>
+  {% if event.sale_state == "open" and event_level == "low" %}<div class="notice info">Hurry: {{ event_message | lower }} for this event.</div>{% endif %}
   <p class="muted">{{ event.starts_at | ist }} IST{% if event.venue %} · {{ event.venue }}{% endif %}
     · booking {{ event.booking_opens_at | ist('%d %b, %H:%M') }} – {{ event.booking_closes_at | ist('%d %b, %H:%M') }}</p>
   <div class="table-wrap"><table>
@@ -39,7 +44,9 @@
       <tr>
         <td>{{ c.name }}{% if c.description %}<br><span class="muted">{{ c.description }}</span>{% endif %}</td>
         <td class="num">{{ c.price_paise | paise if c.price_paise else "Free" }}{% if c.member_discount_eligible and c.price_paise %}<br><span class="muted">member discount applies</span>{% endif %}</td>
-        <td class="num">{{ c.seats_remaining if c.seats_remaining is not none else "—" }}</td>
+        <td class="num">{{ c.seats_remaining if c.seats_remaining is not none else "—" }}
+          {% if c.seats_remaining is not none and c.sale_state == "open" %}{% set lvl, msg = ticket_level(c.seats_remaining, c.capacity) %}
+          {% if lvl == "low" %}<br><span class="badge pending">{{ msg }}</span>{% endif %}{% endif %}</td>
         <td>
           {% if c.sale_state == "open" and (c.seats_remaining is none or c.seats_remaining > 0) %}
           <form data-book data-event="{{ event.id }}" data-category="{{ c.id }}" data-name="{{ c.name }}" class="actions">
@@ -48,7 +55,7 @@
             </select>
             <button type="submit" class="small">Book</button>
           </form>
-          {% elif c.sale_state == "open" %}<span class="badge cancelled">Sold out</span>
+          {% elif c.sale_state == "open" %}<span class="badge failed">SOLD OUT</span>
           {% else %}<span class="muted">{{ "Opens later" if c.sale_state == "not_open" else "Closed" }}</span>{% endif %}
         </td>
       </tr>

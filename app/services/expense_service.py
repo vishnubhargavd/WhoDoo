@@ -378,6 +378,10 @@ async def mark_paid(session: AsyncSession, user: CurrentUser, claim_id: uuid.UUI
         raise conflict("already_paid", "This claim has already been paid")
     if claim.status != "approved":
         raise conflict("not_approved", "Only approved claims can be marked as paid")
+    from app.services import payout_service  # payouts build on this module
+
+    if await payout_service.live_payout_for_claim(session, claim.id) is not None:
+        raise conflict("payout_in_progress", "A UPI payout for this claim is in progress. Wait for it to settle.")
 
     entry = await ledger_service.get_entry_for_reference(
         session, source_module="expense_claim", reference_id=claim.id, entry_type="reimbursement"

@@ -158,7 +158,7 @@ class TicketCheckoutRequest(_Strict):
 
 class TicketCheckoutOut(BaseModel):
     booking_id: uuid.UUID
-    provider: Literal["stripe", "mock"]
+    provider: Literal["stripe", "razorpay", "mock"]
     is_mock: bool
     session_id: str
     checkout_url: str | None = Field(description="Stripe's hosted checkout page. Null with the mock provider")

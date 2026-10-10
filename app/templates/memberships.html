@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Memberships</h1>
 <p class="sub">MemberCore · your standing with the club, and what it gets you.</p>
+{% include "_reminders.html" %}
 
 <div class="card">
   <h2>Your membership <span class="badge {{ {'active': 'paid', 'pending': 'pending', 'expired': 'cancelled', 'cancelled': 'cancelled'}.get(mine.status, 'draft') }}">{{ "Not a member" if mine.status == "none" else mine.status | label }}</span></h2>

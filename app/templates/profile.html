@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Profile · WhoDoo{% endblock %}
+{% block content %}
+<h1>Your profile</h1>
+<p class="sub">What the club knows about you. Only you can change these details.</p>
+
+<div class="card">
+  <h2>Details</h2>
+  <form id="profile-form" class="stack">
+    <div class="fields">
+      <label>Full name <input type="text" name="full_name" value="{{ profile.full_name }}" required maxlength="120"></label>
+      {% if profile.profile_available %}
+      <label>Display name <input type="text" name="display_name" value="{{ profile.display_name or '' }}" maxlength="60" placeholder="What people call you"></label>
+      <label>Phone <input type="tel" name="phone" value="{{ profile.phone or '' }}" maxlength="20" placeholder="+91 98765 43210"></label>
+      <label>Department <input type="text" name="department" value="{{ profile.department or '' }}" maxlength="80" placeholder="Computer Science"></label>
+      <label>Academic year
+        <select name="academic_year">
+          <option value="">—</option>
+          {% for year in range(1, 7) %}<option value="{{ year }}" {{ "selected" if profile.academic_year == year }}>Year {{ year }}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
+    </div>
+    <p class="muted">Sign-in email <strong>{{ profile.email }}</strong> · role <strong>{{ profile.role | label }}</strong>.
+      These, and your membership status and expiry, are managed by the club and cannot be edited here.</p>
+    <div class="actions"><button type="submit">Save details</button></div>
+  </form>
+  {% if not profile.profile_available %}
+  <div class="notice info">Phone, department and UPI details are not switched on in this deployment yet.</div>
+  {% endif %}
+</div>
+
+{% if profile.profile_available %}
+<div class="card">
+  <h2>UPI id for reimbursements
+    {% if profile.payment %}
+    <span class="badge {{ {'verified': 'paid', 'unverified': 'pending', 'invalid': 'cancelled'}[profile.payment.verification_status] }}">
+      {{ profile.payment.verification_status | label }}{% if profile.payment.verified_by_mock %} (mock){% endif %}</span>
+    {% endif %}
+  </h2>
+  <p class="muted">The treasurer pays approved expense claims back to this UPI id. It is stored encrypted and shown masked.
+    Saving it does <strong>not</strong> let anyone take money from you: every payment you make is one you start and approve yourself.</p>
+  {% if profile.payment %}
+  <p>On file: <strong>{{ profile.payment.upi_masked }}</strong>
+    {% if profile.payment.registered_name %} · registered to {{ profile.payment.registered_name }}{% endif %}</p>
+  {% if profile.payment.verification_status == "unverified" %}
+  <div class="notice info">The format looks right, but the account has not been confirmed by a payout provider yet,
+    so reimbursements cannot be sent to it automatically.</div>
+  {% elif profile.payment.verification_status == "invalid" %}
+  <div class="notice error">The payout provider could not confirm this UPI id. Check it and save it again.</div>
+  {% elif profile.payment.verified_by_mock %}
+  <div class="notice info">Verified by the <strong>mock</strong> payout provider: no real bank check took place.</div>
+  {% endif %}
+  {% endif %}
+  <form data-api="PUT" action="/api/v1/me/payment-profile" class="stack">
+    <label>{{ "Replace UPI id" if profile.payment else "UPI id" }}
+      <input type="text" name="upi_id" required maxlength="320" autocomplete="off" spellcheck="false" placeholder="yourname@okbank"></label>
+    <div class="actions">
+      <button type="submit" class="small">Save UPI id</button>
+      {% if profile.payment %}
+      <button type="button" class="small secondary danger" data-delete="/api/v1/me/payment-profile"
+              data-confirm="Remove your UPI id? Reimbursements will then be paid another way.">Remove</button>
+      {% endif %}
+    </div>
+  </form>
+  {% if not payout_provider %}<p class="muted">UPI payouts are off in this deployment, so ids stay unverified.</p>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+// Every field is sent, so clearing one (a phone number, say) clears it on the server too.
+document.getElementById("profile-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target, button = form.querySelector("button[type=submit]");
+  const body = {};
+  for (const [key, value] of new FormData(form).entries()) body[key] = value.trim() === "" ? null : value.trim();
+  if (body.academic_year) body.academic_year = Number(body.academic_year);
+  button.disabled = true;
+  try {
+    await api("PUT", "/api/v1/me/profile", body);
+    sessionStorage.setItem("flash", "Profile saved.");
+    window.location.reload();
+  } catch (error) {
+    showMessage(error.message);
+    button.disabled = false;
+  }
+});
+</script>
+{% endblock %}

@@ -151,6 +151,61 @@
 </section>
 {% endif %}
 
+{% if organizer and registrations and registrations.configured %}
+{# ---- Live registrations (organizers only): FairSeat's own seat count ---- #}
+<section class="card" aria-labelledby="registrations-title">
+  <h2 id="registrations-title">Registrations
+    <span class="badge {{ {'sold_out': 'failed', 'low': 'pending'}.get(registrations.level, 'paid') }}">{{ registrations.status_label }}</span></h2>
+  {% if registrations.level in ("low", "sold_out") %}
+  <div class="notice {{ 'error' if registrations.level == 'sold_out' else 'info' }}">{{ registrations.message }} of {{ registrations.capacity }}.</div>
+  {% endif %}
+  <div class="meta">
+    <span><strong>{{ registrations.total_registrations }}</strong> registrations</span>
+    <span><strong>{{ registrations.confirmed_registrations }}</strong> confirmed ({{ registrations.confirmed_seats }} seats)</span>
+    <span><strong>{{ registrations.held_seats }}</strong> seats on hold</span>
+    <span><strong>{{ registrations.remaining }}</strong> of {{ registrations.capacity }} left</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Category</th><th class="num">Capacity</th><th class="num">Confirmed</th><th class="num">On hold</th><th class="num">Left</th><th></th></tr></thead>
+      <tbody>
+        {% for c in registrations.categories %}
+        <tr>
+          <td>{{ c.name }}</td><td class="num">{{ c.capacity }}</td><td class="num">{{ c.confirmed }}</td>
+          <td class="num">{{ c.held }}</td><td class="num">{{ c.remaining }}</td>
+          <td>{% if c.message %}<span class="badge {{ 'failed' if c.level == 'sold_out' else 'pending' }}">{{ c.message }}</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{% if budget %}
+{# ---- Budget against TrustLedger (organizers and the treasurer) ---- #}
+<section class="card" aria-labelledby="budget-title">
+  <h2 id="budget-title">Budget {% if budget.over_budget %}<span class="badge failed">Over budget</span>{% endif %}</h2>
+  {% if budget.warning %}<div class="notice {{ 'error' if budget.over_budget else 'info' }}">{{ budget.warning }} Nothing is blocked; this is a warning.</div>{% endif %}
+  <div class="meta">
+    <span>Budget <strong>{{ budget.budget_paise | paise if budget.budget_paise is not none else "not set" }}</strong></span>
+    <span>Spent <strong>{{ budget.spent_paise | paise }}</strong></span>
+    <span>Approved, not paid <strong>{{ budget.committed_paise | paise }}</strong></span>
+    <span>Claims pending approval <strong>{{ budget.pending_paise | paise }}</strong></span>
+    {% if budget.remaining_paise is not none %}<span>Remaining <strong>{{ budget.remaining_paise | paise }}</strong></span>{% endif %}
+  </div>
+  {% if budget.available and event.status != "cancelled" %}
+  <form action="/api/v1/events/{{ event.id }}/budget" class="actions" id="budget-form">
+    <label>Set budget (₹) <input type="number" name="budget_rupees" min="0" step="0.01" required
+      value="{{ budget.budget_paise | paise_input if budget.budget_paise is not none else '' }}"></label>
+    <button type="submit" class="small secondary">Save budget</button>
+  </form>
+  {% elif not budget.available %}
+  <p class="muted">Event budgets are not switched on in this deployment. Spending is still tracked in the ledger.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {# ---- CrewPulse ---- #}
 <section class="card" aria-labelledby="tasks-title">
   <div class="actions" style="justify-content: space-between">
@@ -236,4 +291,18 @@
   {% endif %}
 </section>
 {% endblock %}
-{% block scripts %}<script src="/static/events.js"></script>{% endblock %}
+{% block scripts %}<script src="/static/events.js"></script>
+<script>
+// Rupees in the box, whole paise to the API (no floating point).
+document.getElementById("budget-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target, value = form.budget_rupees.value.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(value)) { showMessage("Enter the budget in rupees, up to two decimals."); return; }
+  const [whole, part = ""] = value.split(".");
+  try {
+    await api("PUT", form.getAttribute("action"), { budget_paise: Number(whole) * 100 + Number((part + "00").slice(0, 2)) });
+    sessionStorage.setItem("flash", "Budget saved.");
+    window.location.reload();
+  } catch (error) { showMessage(error.message); }
+});
+</script>{% endblock %}

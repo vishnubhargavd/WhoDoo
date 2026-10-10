@@ -127,7 +127,8 @@ def test_navigation_is_role_aware(monkeypatch):
         return {section["title"]: [link["label"] for link in section["links"]] for section in nav["sections"]}
 
     assert links("member") == {
-        "Events": ["Events", "My tasks"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"]}
+        "Events": ["Events", "My tasks"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"],
+        "Me": ["Profile", "Notifications"]}
     assert links("event_lead")["Expenses"] == ["My expenses", "Submit expense", "Approvals"]
     assert "Finance" not in links("event_lead")
     assert links("treasurer")["Finance"] == ["Dashboard", "Ledger"]
@@ -145,7 +146,8 @@ def test_navigation_is_role_aware(monkeypatch):
     assert navigation(Person("member"), "/home")["current"] is None
     assert navigation(None, "/")["sections"] == []
     assert navigation(Person("member"), "/")["coming_soon"] == (
-        "Memberships", "Tickets", "Check-in", "Announcements", "Certificates", "Handover")
+        "Memberships", "Tickets", "Check-in", "Announcements", "Certificates", "Handover",
+        "Profile & UPI", "Renewal reminders", "Event budgets")
 
     monkeypatch.setattr(modules, "_tables", frozenset(modules.MODULES))   # every module migrated
     assert links("member")["Tickets"] == ["Book tickets", "My tickets"]              # the door is for door staff

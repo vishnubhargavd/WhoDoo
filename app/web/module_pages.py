@@ -24,6 +24,7 @@ from app.services import (
     handover_service,
     membership_service,
     modules,
+    reminder_service,
     ticket_service,
 )
 from app.web.templating import render
@@ -58,7 +59,14 @@ async def memberships(request: Request, user: CurrentUser = Me, db: AsyncSession
         plans=await membership_service.list_plans(db, user, include_hidden=officer),
         members=await membership_service.list_members(db, user) if officer else [],
         officer=officer,
+        reminders=await _reminders(db, user),
     )
+
+
+async def _reminders(db: AsyncSession, user: CurrentUser):
+    found = await reminder_service.list_for(db, user, unread_only=True)
+    await db.commit()
+    return found
 
 
 @router.get("/memberships/return", dependencies=needs("memberships"))

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Notifications · WhoDoo{% endblock %}
+{% block content %}
+<h1>Notifications</h1>
+<p class="sub">Membership renewal reminders for your current term.</p>
+
+{% if reminders %}
+<div class="card">
+  <table>
+    <thead><tr><th>Reminder</th><th>Plan</th><th>Expires</th><th>Sent</th><th></th></tr></thead>
+    <tbody>
+      {% for r in reminders %}
+      <tr class="{{ 'muted' if r.read }}">
+        <td><strong>{{ r.title }}</strong><br><span class="muted">{{ r.message }}</span></td>
+        <td>{{ r.plan_name or "—" }}{% if r.club_name %}<br><span class="muted">{{ r.club_name }}</span>{% endif %}</td>
+        <td>{{ r.expires_at | nice_date }}</td>
+        <td>{{ r.created_at | nice_date }}</td>
+        <td class="actions">
+          <a class="button small" href="{{ r.renew_url }}">Renew now</a>
+          {% if not r.read %}<button type="button" class="small secondary" data-post="/api/v1/me/notifications/{{ r.id }}/read">Mark read</button>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><p class="empty">Nothing to renew right now. You will be reminded 30, 14, 7 and 1 days before your membership runs out.</p></div>
+{% endif %}
+{% endblock %}

@@ -51,6 +51,29 @@ class Settings(BaseSettings):
     # Where Stripe sends the buyer back to after paying.
     app_base_url: str = "http://127.0.0.1:8000"
 
+    # Razorpay (PAYMENT_PROVIDER=razorpay), TEST MODE ONLY: only rzp_test_ key ids are used.
+    # Without them the mock provider stays in place. See README_BATCH_A.md.
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    razorpay_api_base: str = "https://api.razorpay.com/v1"
+    # Reimbursement payouts: off | mock | razorpayx. razorpayx also needs the test-mode keys above
+    # and RAZORPAYX_ACCOUNT_NUMBER; anything less falls back to off. mock never moves money.
+    payouts_provider: str = "mock"
+    razorpayx_account_number: str = ""
+    # Encrypts stored UPI ids (any string; a Fernet key is derived from it). Blank = derived from
+    # JWT_SECRET, acceptable only with demo sign-in (see check()).
+    payment_profile_key: str = ""
+
+    # MemberCore renewal reminders: days before expiry, and how often the in-process job runs
+    # (0 = only when members open their pages; the job is idempotent either way).
+    renewal_reminder_days: str = "30,14,7,1"
+    renewal_reminder_interval_seconds: int = Field(3600, ge=0, le=86400)
+
+    # Low-ticket warning: whichever is reached first, this share of capacity or this many seats.
+    low_ticket_percent: int = Field(10, ge=0, le=100)
+    low_ticket_seats: int = Field(5, ge=0, le=1000)
+
     # FairSeat ticket booking. Off by default: the routes answer 404 until it is switched on.
     # With demo sign-in anyone can act as anyone, so it may only be on against a local database.
     fairseat_enabled: bool = False
@@ -90,6 +113,29 @@ class Settings(BaseSettings):
         key = self.stripe_secret_key.strip()
         return key.startswith(("sk_test_", "rk_test_")) and "REPLACE" not in key
 
+    @property
+    def use_razorpay(self) -> bool:
+        """Razorpay is used only when asked for, and only with a test-mode key pair."""
+        return (
+            self.payment_provider == "razorpay"
+            and self.razorpay_key_id.strip().startswith("rzp_test_")
+            and bool(self.razorpay_key_secret.strip())
+        )
+
+    @property
+    def renewal_reminder_offsets(self) -> tuple[int, ...]:
+        days = {int(part) for part in self.renewal_reminder_days.split(",") if part.strip().isdigit()}
+        return tuple(sorted((d for d in days if 0 < d <= 365), reverse=True))
+
+    @property
+    def profile_secret(self) -> str | None:
+        """The key material for UPI encryption. None when only a weak fallback is available
+        outside demo sign-in: saving or reading UPI ids is then refused (profile_service)."""
+        secret = self.payment_profile_key or self.jwt_secret
+        if not self.demo_auth and (secret == DEFAULT_JWT_SECRET or len(secret) < 32):
+            return None
+        return secret
+
     def check(self) -> None:
         if self.supabase_jwt_secret:
             raise RuntimeError(
@@ -112,6 +158,10 @@ class Settings(BaseSettings):
                     "TICKET_CREDENTIAL_SECRET must be set to at least 32 characters when FAIRSEAT_ENABLED is on: "
                     "it signs the QR code on every ticket"
                 )
+        if self.razorpay_key_id.strip().startswith("rzp_live_"):
+            raise RuntimeError("RAZORPAY_KEY_ID is a live key. This app only accepts Razorpay test-mode keys (rzp_test_)")
+        if self.payment_profile_key and len(self.payment_profile_key) < 32:
+            raise RuntimeError("PAYMENT_PROFILE_KEY must be at least 32 characters: it encrypts UPI ids")
         if self.demo_auth and not self.database_is_local:
             raise RuntimeError(
                 "DEMO_AUTH cannot be used with a database that is not local: demo sign-in lets anyone act as anyone"

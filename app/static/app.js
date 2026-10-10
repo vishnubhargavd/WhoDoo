@@ -179,8 +179,9 @@ document.addEventListener("submit", async (event) => {
 
 // <button data-post="/api/v1/..." data-prompt="Reason" data-field="reason" data-required>
 // <button data-put="/api/v1/..." data-body='{"is_active": false}'>
+// <button data-delete="/api/v1/..." data-confirm="...">
 document.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-post], [data-put]");
+  const button = event.target.closest("[data-post], [data-put], [data-delete]");
   if (!button) return;
   event.preventDefault();
   const body = button.dataset.body ? JSON.parse(button.dataset.body) : {};
@@ -202,9 +203,11 @@ document.addEventListener("click", async (event) => {
   }
   button.disabled = true;
   try {
-    const result = button.dataset.put
-      ? await api("PUT", button.dataset.put, body)
-      : await api("POST", button.dataset.post, body);
+    const result = button.dataset.delete
+      ? await api("DELETE", button.dataset.delete)
+      : button.dataset.put
+        ? await api("PUT", button.dataset.put, body)
+        : await api("POST", button.dataset.post, body);
     finish(button, result);
   } catch (error) {
     showMessage(error.message);

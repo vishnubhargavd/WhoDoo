@@ -32,6 +32,8 @@ from app.services import (
     merch_service,
     modules,
     payment_service,
+    payout_service,
+    reminder_service,
     shared_directory,
     task_service,
 )
@@ -173,7 +175,10 @@ async def welcome():
 async def home(request: Request, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """A signed-in person's own page: live figures from every module they can use."""
     club = await shared_directory.get_club(db, user.club_id)
-    return render(request, "home.html", user, tiles=await _home_tiles(db, user), club_name=club.name if club else None)
+    reminders = await reminder_service.list_for(db, user, unread_only=True)
+    await db.commit()
+    return render(request, "home.html", user, tiles=await _home_tiles(db, user), club_name=club.name if club else None,
+                  reminders=reminders)
 
 
 @router.get("/whoami")
@@ -281,6 +286,9 @@ async def expense_detail(
 ):
     claim = await expense_service.get_claim_detail(db, user, expense_id)
     events = await shared_directory.list_events(db, user.club_id)
+    payout = None
+    if user.is_finance_admin and claim.status in ("approved", "paid") and modules.migrated("profile"):
+        payout = await payout_service.readiness(db, user, expense_id)
     return render(
         request,
         "expense_detail.html",
@@ -289,6 +297,7 @@ async def expense_detail(
         events=events,
         categories=EXPENSE_CATEGORIES,
         approval_limit=get_settings().expense_auto_approval_limit,
+        payout=payout,
     )
 
 

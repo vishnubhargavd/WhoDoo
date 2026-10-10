@@ -17,7 +17,7 @@ class CheckoutSessionOut(BaseModel):
 
     merch_order_id: uuid.UUID
     order_number: str
-    provider: Literal["stripe", "mock"]
+    provider: Literal["stripe", "razorpay", "mock"]
     is_mock: bool
     session_id: str
     checkout_url: str = Field(description="Stripe's hosted checkout page, or the local mock checkout")

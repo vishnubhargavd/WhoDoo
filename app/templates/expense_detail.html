@@ -145,6 +145,45 @@
   </div>
 </div>
 
+{% if payout %}
+<div class="card">
+  <h2>Pay back by UPI
+    {% if payout.provider %}<span class="badge {{ 'draft' if payout.is_mock else 'final' }}">{{ payout.provider }}{% if payout.is_mock %} · mock, no real money{% endif %}</span>{% endif %}
+  </h2>
+  <p>Claimant's UPI id: <strong>{{ payout.payee_upi_masked or "none on file" }}</strong>
+    {% if payout.payee_verification %}<span class="badge {{ {'verified': 'paid', 'unverified': 'pending', 'invalid': 'failed'}[payout.payee_verification] }}">{{ payout.payee_verification | label }}</span>{% endif %}</p>
+  {% if payout.can_pay_out %}
+  <div class="actions">
+    <button data-post="/api/v1/expenses/{{ claim.id }}/payout"
+            data-confirm="Send {{ claim.amount | inr }} to {{ payout.payee_upi_masked }}? The claim is marked paid only once the payout provider confirms it.">
+      Pay {{ claim.amount | inr }} by UPI</button>
+  </div>
+  {% elif payout.reason and claim.status == "approved" %}
+  <div class="notice info">{{ payout.reason }}</div>
+  {% endif %}
+  {% if payout.payouts %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Attempt</th><th>Status</th><th>To</th><th>Reference</th><th>Updated</th><th></th></tr></thead>
+      <tbody>
+        {% for p in payout.payouts %}
+        <tr>
+          <td>#{{ p.attempt }}</td>
+          <td><span class="badge {{ {'processed': 'paid', 'failed': 'failed', 'reversed': 'failed'}.get(p.status, 'pending') }}">{{ p.status | label }}</span>
+            {% if p.failure_reason %}<br><span class="muted">{{ p.failure_reason }}</span>{% endif %}</td>
+          <td>{{ p.upi_masked }}</td>
+          <td>{{ p.utr or p.provider_payout_id or "—" }}</td>
+          <td class="nowrap">{{ p.updated_at | nice_date }}</td>
+          <td>{% if p.status in ("initiated", "processing") %}<button class="small secondary" data-post="/api/v1/payouts/{{ p.id }}/refresh">Check status</button>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
   <h2>Approval history</h2>
   <div class="table-wrap">

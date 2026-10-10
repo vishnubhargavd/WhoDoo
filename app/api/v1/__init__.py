@@ -8,6 +8,7 @@ from app.api.v1 import (
     fairseat,
     fairseat_payments,
     ledger,
+    member2,
     memberships,
     merch,
     payments,
@@ -35,3 +36,8 @@ api_router.include_router(community.announcements)
 api_router.include_router(community.public)
 api_router.include_router(community.certificates)
 api_router.include_router(community.handover)
+# Member 2, Batch A: profile and UPI, renewal reminders, payouts, registrations and budget, Razorpay
+api_router.include_router(member2.me)
+api_router.include_router(member2.payouts)
+api_router.include_router(member2.events)
+api_router.include_router(member2.razorpay)

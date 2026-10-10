@@ -90,6 +90,10 @@ SECTIONS = (
         ("Merch admin", "/admin/merch", FINANCE_ROLES, None),
         ("Merch orders", "/admin/merch/orders", FINANCE_ROLES, None),
     )),
+    ("Me", (
+        ("Profile", "/profile", None, None),
+        ("Notifications", "/notifications", None, None),
+    )),
     ("Finance", (
         ("Dashboard", "/treasurer", FINANCE_ROLES, None),
         ("Ledger", "/treasurer/ledger", FINANCE_ROLES, None),

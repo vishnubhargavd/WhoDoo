@@ -296,6 +296,15 @@ def _mock_provider() -> MockPaymentProvider:
 @lru_cache
 def get_provider() -> PaymentProvider:
     settings = get_settings()
+    if settings.use_razorpay:
+        from app.services.razorpay_provider import RazorpayPaymentProvider
+
+        return RazorpayPaymentProvider(
+            settings.razorpay_key_id.strip(), settings.razorpay_key_secret.strip(), settings.razorpay_webhook_secret.strip()
+        )
+    if settings.payment_provider == "razorpay":
+        logger.warning("PAYMENT_PROVIDER=razorpay but no rzp_test_ key pair is set; using mock payments.")
+        return _mock_provider()
     if settings.use_stripe:
         return StripePaymentProvider(settings.stripe_secret_key.strip(), settings.stripe_webhook_secret.strip())
     if settings.payment_provider != "mock":
@@ -308,8 +317,8 @@ def get_provider() -> PaymentProvider:
 
 
 def _fall_back_to_mock(reason: str) -> PaymentProvider:
-    """Stripe refused the key. Use mock payments until the server is restarted with a working key."""
-    logger.error("Stripe rejected the configured key (%s). Using mock payments until restart.", reason)
+    """The provider refused the key. Use mock payments until the server is restarted with a working key."""
+    logger.error("The payment provider rejected the configured key (%s). Using mock payments until restart.", reason)
     get_provider.cache_clear()
     get_settings().payment_provider = "mock"
     return get_provider()

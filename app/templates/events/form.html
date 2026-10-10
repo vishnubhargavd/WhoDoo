@@ -6,9 +6,8 @@
 <p class="sub">{% if event %}Changes are saved to the club calendar straight away.{% else %}New events start as drafts. Publish when the details are final.{% endif %} Times are in IST.</p>
 
 <div class="card">
-  <form class="stack" data-api="{{ 'PATCH' if event else 'POST' }}"
-        action="/api/v1/events{{ '/' ~ event.id if event else '' }}"
-        data-next="{{ '/events/' ~ event.id if event else '/events' }}">
+  <form class="stack" id="event-form" data-method="{{ 'PATCH' if event else 'POST' }}"
+        action="/api/v1/events{{ '/' ~ event.id if event else '' }}">
     <label>Title
       <input type="text" name="name" minlength="3" maxlength="120" required value="{{ event.name if event else '' }}"
              placeholder="e.g. Spring Gala">
@@ -31,6 +30,16 @@
       </label>
       {% endif %}
     </div>
+    {% if budgets_on %}
+    <div class="fields">
+      <label>Budget (₹)
+        <input type="number" name="budget_rupees" min="0" max="9999999999" step="0.01" inputmode="decimal"
+               value="{{ budget.budget_paise | paise_input if budget and budget.budget_paise is not none else '' }}" placeholder="e.g. 25000">
+      </label>
+    </div>
+    {% endif %}
+    <p class="muted">Capacity, ticket categories with their own limits, and registration opening and closing dates are set on
+      {% if event %}<a href="/events/{{ event.id }}/tickets">Ticket settings</a>{% else %}the event's Ticket settings page once it is created{% endif %}.</p>
     {% if user.role != "president" %}<p class="muted">You will lead this event. Only the president can hand it to someone else.</p>{% endif %}
     <div class="actions">
       <button type="submit">{{ "Save changes" if event else "Create draft" }}</button>
@@ -38,4 +47,31 @@
     </div>
   </form>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+// The event and its budget are two API calls: the event first, then the budget (in paise).
+document.getElementById("event-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target, button = form.querySelector("button[type=submit]");
+  const body = formToJson(form);
+  const rupees = body.budget_rupees;
+  delete body.budget_rupees;
+  if (rupees !== undefined && !/^\d+(\.\d{1,2})?$/.test(rupees)) { showMessage("Enter the budget in rupees, up to two decimals."); return; }
+  button.disabled = true;
+  try {
+    const saved = await api(form.dataset.method, form.getAttribute("action"), body);
+    if (rupees !== undefined) {
+      const [whole, part = ""] = rupees.split(".");
+      const paise = Number(whole) * 100 + Number((part + "00").slice(0, 2));
+      await api("PUT", `/api/v1/events/${saved.id}/budget`, { budget_paise: paise });
+    }
+    window.location.href = `/events/${saved.id}`;
+  } catch (error) {
+    showMessage(error.message);
+    button.disabled = false;
+  }
+});
+</script>
+
 {% endblock %}

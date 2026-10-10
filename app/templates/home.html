@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Hey {{ user.full_name.split(" ")[0] }}.</h1>
 <p class="sub">Here is what needs you today across {{ club_name or "your club" }}.</p>
+{% include "_reminders.html" %}
 
 <ul class="tiles">
   {% set accents = ("", "mint", "butter", "cobalt") %}

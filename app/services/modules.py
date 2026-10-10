@@ -23,6 +23,10 @@ MODULES = {
     "announcements": ("Announcements", "announcements"),
     "certificates": ("Certificates", "certificates"),
     "handover": ("Handover", "handover_note_versions"),
+    # Batch A (migrations/pending/040-042)
+    "profile": ("Profile & UPI", "user_payment_profiles"),
+    "reminders": ("Renewal reminders", "membership_renewal_reminders"),
+    "budgets": ("Event budgets", "event_budgets"),
 }
 NEEDS_FAIRSEAT = ("tickets", "checkin")
 
