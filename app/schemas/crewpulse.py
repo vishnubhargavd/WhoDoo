@@ -83,6 +83,7 @@ class TaskOut(BaseModel):
     updated_at: datetime
     completed_at: datetime | None
     risks: list[str] = []
+    clashes: list[str] = Field(default_factory=list, description="Integration point for volunteer clash review")
     can_edit: bool = False
     can_update_status: bool = False
 

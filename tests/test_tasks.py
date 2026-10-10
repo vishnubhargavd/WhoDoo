@@ -169,3 +169,81 @@ async def test_tasks_frozen_when_event_cancelled(client, world, auth):
     assert (await client.post(f"{TASKS}/{task_id}/status", headers=auth(world.volunteer),
                               json={"status": "done"})).status_code == 409
     assert (await client.get(f"{TASKS}/mine", headers=auth(world.volunteer))).json() == []
+
+
+async def test_crewpulse_volunteer_coordination_and_audit(client, world, auth):
+    event_id = await published_event(client, auth, world)
+
+    # 1. Lead creates a task assigned to volunteer with deadline
+    res = await add_task(
+        client, auth, world.lead, event_id,
+        title="Stage Cable Setup",
+        description="Run XLR cables to stage",
+        priority="high",
+        is_critical=True,
+        assignee_id=str(world.volunteer.id),
+        due_at=at(12),
+    )
+    assert res.status_code == 201
+    task = res.json()
+    task_id = task["id"]
+    assert task["title"] == "Stage Cable Setup"
+    assert task["status"] == "todo"
+    assert task["assignee_name"] == "Vik Volunteer"
+    assert "clashes" in task
+
+    # 2. Duplicate task on same event is rejected
+    dupe = await add_task(client, auth, world.lead, event_id, title="Stage Cable Setup")
+    assert dupe.status_code == 409
+
+    # 3. Volunteer sees their assigned task
+    mine = (await client.get(f"{TASKS}/mine", headers=auth(world.volunteer))).json()
+    my_task = next(t for t in mine if t["id"] == task_id)
+    assert my_task["can_update_status"] is True
+    assert my_task["can_edit"] is False
+
+    # 4. Unrelated member cannot update status or edit
+    unauth_status = await client.post(
+        f"{TASKS}/{task_id}/status",
+        headers=auth(world.member),
+        json={"status": "in_progress"},
+    )
+    assert unauth_status.status_code == 403
+
+    unauth_edit = await client.patch(
+        f"{TASKS}/{task_id}",
+        headers=auth(world.member),
+        json={"title": "Hacked Title"},
+    )
+    assert unauth_edit.status_code == 403
+
+    # 5. Volunteer starts task, then reports a blocker
+    await client.post(f"{TASKS}/{task_id}/status", headers=auth(world.volunteer), json={"status": "in_progress"})
+    blocked = await client.post(
+        f"{TASKS}/{task_id}/status",
+        headers=auth(world.volunteer),
+        json={"status": "blocked", "blocker_note": "Need 50m extension reel"},
+    )
+    assert blocked.status_code == 200
+    assert blocked.json()["status"] == "blocked"
+    assert blocked.json()["blocker_note"] == "Need 50m extension reel"
+
+    # 6. Event lead unblocks and marks completed
+    done = await client.post(
+        f"{TASKS}/{task_id}/status",
+        headers=auth(world.lead),
+        json={"status": "done"},
+    )
+    assert done.status_code == 200
+    assert done.json()["status"] == "done"
+    assert done.json()["completed_at"] is not None
+
+    # 7. Verify full activity audit history
+    activity = (await client.get(f"{TASKS}/{task_id}/activity", headers=auth(world.lead))).json()
+    actions = [a["action"] for a in activity]
+    assert actions == ["created", "assigned", "status_changed", "status_changed", "status_changed"]
+    assert activity[3]["note"] == "Need 50m extension reel"
+    assert activity[3]["actor_name"] == "Vik Volunteer"
+    assert activity[4]["to_value"] == "done"
+    assert activity[4]["actor_name"] == "Leo Lead"
+
