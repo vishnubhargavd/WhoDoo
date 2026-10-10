@@ -66,6 +66,21 @@ class Settings(BaseSettings):
     # app signs its own sign-in tokens with a real one (see check()).
     ticket_credential_secret: str = ""
 
+    # Public event registration. A place is held this long while a paid registration is being paid for
+    # (Stripe will not expire a checkout session sooner than 30 minutes).
+    registration_hold_seconds: int = 1800
+    # Participant details are deleted this many days after the event ends.
+    registration_retention_days: int = Field(60, ge=1, le=365)
+    # Most registrations one address may submit in ten minutes. 0 turns the limit off.
+    registration_rate_limit: int = 20
+    # Ticket emails. With no SMTP host they are written to MAIL_OUTBOX_DIR instead of being sent.
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    mail_from: str = ""
+    mail_outbox_dir: str = "outbox"
+
     @property
     def database_is_local(self) -> bool:
         return urlsplit(self.database_url).hostname in (None, "localhost", "127.0.0.1", "::1")

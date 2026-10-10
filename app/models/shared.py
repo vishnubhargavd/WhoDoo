@@ -7,7 +7,7 @@ See migrations/000_shared_placeholders.sql. Only app/services/shared_directory.p
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -51,3 +51,9 @@ class Event(Base):
     status: Mapped[str] = mapped_column(Text, server_default="draft")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     updated_at: Mapped[datetime] = updated_at_col()
+    # Public registration (migrations/012_public_events.sql). All additive.
+    # References venues(id) in the database; not declared here so this file needs no other model loaded.
+    venue_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    registration_mode: Mapped[str] = mapped_column(Text, server_default="none")
+    max_participants: Mapped[int | None] = mapped_column(Integer)
+    price_paise: Mapped[int] = mapped_column(BigInteger, server_default="0")
