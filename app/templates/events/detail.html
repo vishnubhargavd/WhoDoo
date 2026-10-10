@@ -67,6 +67,68 @@
   </section>
 </div>
 
+<div class="grid two" style="margin-top: 1.5rem;">
+  {# ---- Registration & Ticket Availability ---- #}
+  <section class="card" aria-labelledby="reg-stats-title">
+    <div class="actions" style="justify-content: space-between; align-items: center;">
+      <h2 id="reg-stats-title" style="margin: 0;">Registrations & Availability</h2>
+      <span class="badge {{ 'danger' if registration_stats.is_sold_out else 'warning' if registration_stats.is_low_seats else 'ok' }}">{{ registration_stats.status_label }}</span>
+    </div>
+
+    {% if registration_stats.is_sold_out %}
+      <div class="notice error" style="margin-top: 0.75rem;"><strong>SOLD OUT.</strong> All registration capacity is currently filled.</div>
+    {% elif registration_stats.is_registration_closed %}
+      <div class="notice info" style="margin-top: 0.75rem;"><strong>REGISTRATION CLOSED.</strong> The registration deadline has passed.</div>
+    {% elif registration_stats.is_low_seats %}
+      <div class="notice warning" style="margin-top: 0.75rem;"><strong>LOW SEATS WARNING!</strong> Only {{ registration_stats.remaining_seats }} seat(s) remaining. Book soon!</div>
+    {% endif %}
+
+    <dl class="kv" style="margin-top: 1rem;">
+      <dt>Total capacity</dt><dd>{{ registration_stats.capacity if registration_stats.capacity is not none else 'Open / Dynamic' }}</dd>
+      <dt>Confirmed bookings</dt><dd><strong>{{ registration_stats.confirmed_registrations }}</strong></dd>
+      <dt>Pending / held</dt><dd>{{ registration_stats.pending_held_seats }}</dd>
+      <dt>Remaining seats</dt><dd><strong>{{ registration_stats.remaining_seats if registration_stats.remaining_seats is not none else 'Available' }}</strong></dd>
+      <dt>Waitlist waiting</dt><dd>{{ registration_stats.waitlist_count }}</dd>
+    </dl>
+
+    {% if registration_stats.categories %}
+    <h3 style="font-size: 1.1rem; margin-top: 1rem;">Category-wise Capacity</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Category</th><th class="num">Capacity</th><th class="num">Confirmed</th><th class="num">Remaining</th><th>Status</th></tr></thead>
+        <tbody>
+          {% for c in registration_stats.categories %}
+          <tr>
+            <td><strong>{{ c.name }}</strong></td>
+            <td class="num">{{ c.capacity }}</td>
+            <td class="num">{{ c.confirmed }}</td>
+            <td class="num">{{ c.remaining }}</td>
+            <td><span class="badge {{ 'danger' if c.is_sold_out else 'warning' if c.is_low_seats else 'ok' }}">{{ c.status }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </section>
+
+  {# ---- Event Budget Dashboard ---- #}
+  <section class="card" aria-labelledby="budget-title">
+    <h2 id="budget-title" style="margin: 0;">Event Budget Dashboard</h2>
+    {% if budget.is_over_budget %}
+      <div class="notice error" style="margin-top: 0.75rem;"><strong>OVER-BUDGET WARNING!</strong> Approved and paid expenses exceed allocated budget by {{ budget.over_budget_amount_inr | inr }}.</div>
+    {% endif %}
+
+    <dl class="kv" style="margin-top: 1rem;">
+      <dt>Budget allocated</dt><dd><strong>{{ budget.budget_allocated_inr | inr }}</strong></dd>
+      <dt>Expenses approved</dt><dd>{{ budget.expenses_approved_inr | inr }}</dd>
+      <dt>Amount actually paid</dt><dd>{{ budget.expenses_paid_inr | inr }}</dd>
+      <dt>Pending expenses</dt><dd>{{ budget.expenses_pending_inr | inr }}</dd>
+      <dt>Remaining budget</dt><dd><strong style="color: {{ 'var(--danger, #ef4444)' if budget.is_over_budget else 'var(--ok, #10b981)' }}">{{ budget.remaining_budget_inr | inr }}</strong></dd>
+    </dl>
+  </section>
+</div>
+
 {% if organizer %}
 <div class="grid two">
   {# ---- Event Autopilot ---- #}
@@ -233,6 +295,7 @@
       <div class="actions"><button type="submit">Add task</button></div>
     </form>
   </details>
+  {% endif %}
 </section>
 
 <section class="card" aria-labelledby="expenses-title" style="margin-top: 24px">

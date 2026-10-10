@@ -85,7 +85,19 @@ async def event_detail_page(
     tasks = await task_service.to_out(db, user, await task_service.list_for_event(db, event))
     organizer = event_service.can_manage(user, event)
     event_expenses = await expense_service.list_event_expenses(db, user, event_id)
-    context = dict(event=out, tasks=tasks, organizer=organizer, readiness=None, schedule=None, people=[], expenses=event_expenses)
+    budget = await event_service.get_event_budget_dashboard(db, user, event_id)
+    registration_stats = await event_service.get_event_registration_stats(db, user, event_id)
+    context = dict(
+        event=out,
+        tasks=tasks,
+        organizer=organizer,
+        readiness=None,
+        schedule=None,
+        people=[],
+        expenses=event_expenses,
+        budget=budget,
+        registration_stats=registration_stats,
+    )
     if organizer:
         context.update(
             readiness=await event_service.readiness(db, user, event),

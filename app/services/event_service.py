@@ -14,19 +14,26 @@ Authorization rules (checked here, never trusted from the request):
 import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
+from decimal import Decimal
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import ROLE_EVENT_LEAD, ROLE_PRESIDENT, CurrentUser
 from app.core.errors import bad_request, conflict, forbidden, not_found
 from app.models.crewpulse import CrewTask
+from app.models.expense import ExpenseClaim
+from app.models.fairseat import TicketBooking, TicketCategory, TicketWaitlistEntry
+from app.models.ledger import LedgerEntry
 from app.models.shared import Event, User
 from app.schemas.events import (
+    CategoryAvailabilityOut,
     CrewMember,
+    EventBudgetDashboardOut,
     EventCreate,
     EventOut,
+    EventRegistrationStatsOut,
     EventUpdate,
     ReadinessOut,
     ScheduleCheckOut,
@@ -214,6 +221,10 @@ async def create_event(db: AsyncSession, user: CurrentUser, data: EventCreate, n
     event = Event(
         club_id=user.club_id, name=data.name, description=data.description, starts_at=data.starts_at,
         ends_at=data.ends_at, venue=venue, lead_id=lead_id, status="draft", created_by=user.id,
+        budget_inr=data.budget_inr,
+        registration_capacity=data.registration_capacity,
+        registration_opens_at=data.registration_opens_at,
+        registration_closes_at=data.registration_closes_at,
     )
     _sync_event_date(event)
     db.add(event)
@@ -371,3 +382,185 @@ async def readiness(db: AsyncSession, user: CurrentUser, event: Event, now: date
         event_id=event.id, applicable=report.applicable, score=report.score, band=report.band,
         summary=report.summary, factors=[vars(f) for f in report.factors], stats=report.stats, generated_at=now,
     )
+
+
+async def get_event_budget_dashboard(
+    db: AsyncSession, user: CurrentUser, event_id: uuid.UUID
+) -> EventBudgetDashboardOut:
+    """Authoritative event-specific financial summary: budget allocated, expenses approved, paid, pending, remaining, and over-budget warning."""
+    event = await get_visible_event(db, user, event_id)
+
+    # 1. Authoritative Expense Claims for this event
+    claims_res = await db.execute(
+        select(ExpenseClaim).where(ExpenseClaim.event_id == event.id)
+    )
+    claims = list(claims_res.scalars().all())
+
+    expenses_approved = sum((c.amount for c in claims if c.status == "approved"), Decimal("0.00"))
+    expenses_paid = sum((c.amount for c in claims if c.status == "paid"), Decimal("0.00"))
+    expenses_pending = sum(
+        (c.amount for c in claims if c.status in ("draft", "pending_approval", "change_requested")),
+        Decimal("0.00"),
+    )
+
+    # 2. Check direct ledger outflows if any (not already tracked as claims)
+    claim_ids = {c.id for c in claims}
+    ledger_res = await db.execute(
+        select(LedgerEntry).where(
+            LedgerEntry.event_id == event.id,
+            LedgerEntry.direction == "outflow",
+        )
+    )
+    for entry in ledger_res.scalars().all():
+        if entry.reference_id not in claim_ids:
+            if entry.payment_status == "paid":
+                expenses_paid += entry.amount
+            elif entry.payment_status == "approved":
+                expenses_approved += entry.amount
+            elif entry.payment_status == "pending":
+                expenses_pending += entry.amount
+
+    budget_allocated = event.budget_inr
+    remaining = budget_allocated - (expenses_approved + expenses_paid)
+    is_over = remaining < Decimal("0.00")
+    over_amount = abs(remaining) if is_over else Decimal("0.00")
+
+    return EventBudgetDashboardOut(
+        event_id=event.id,
+        event_name=event.name,
+        budget_allocated_inr=budget_allocated,
+        expenses_approved_inr=expenses_approved,
+        expenses_paid_inr=expenses_paid,
+        expenses_pending_inr=expenses_pending,
+        remaining_budget_inr=remaining,
+        is_over_budget=is_over,
+        over_budget_amount_inr=over_amount,
+    )
+
+
+async def get_event_registration_stats(
+    db: AsyncSession, user: CurrentUser, event_id: uuid.UUID, now: datetime | None = None
+) -> EventRegistrationStatsOut:
+    """Calculated registration counts, category availability, low-seat warnings, and waitlist state from real database records."""
+    now = now or utcnow()
+    event = await get_visible_event(db, user, event_id)
+
+    # Query all ticket categories for the event
+    cat_res = await db.execute(
+        select(TicketCategory).where(TicketCategory.event_id == event.id)
+        .order_by(TicketCategory.sort_order, TicketCategory.name)
+    )
+    categories = list(cat_res.scalars().all())
+
+    category_stats: list[CategoryAvailabilityOut] = []
+    total_confirmed = 0
+    total_held = 0
+
+    for cat in categories:
+        # Confirmed
+        conf_stmt = select(func.coalesce(func.sum(TicketBooking.quantity), 0)).where(
+            TicketBooking.event_id == event.id,
+            TicketBooking.ticket_category_id == cat.id,
+            TicketBooking.status == "confirmed",
+        )
+        conf_count = int(await db.scalar(conf_stmt) or 0)
+
+        # Held (pending payment with unexpired hold)
+        held_stmt = select(func.coalesce(func.sum(TicketBooking.quantity), 0)).where(
+            TicketBooking.event_id == event.id,
+            TicketBooking.ticket_category_id == cat.id,
+            TicketBooking.status == "pending_payment",
+            TicketBooking.hold_expires_at > now,
+        )
+        held_count = int(await db.scalar(held_stmt) or 0)
+
+        total_confirmed += conf_count
+        total_held += held_count
+
+        remaining = max(0, cat.capacity - (conf_count + held_count))
+        # Threshold: 10% remaining or 5 seats, whichever alerts earlier
+        threshold = min(max(1, int(cat.capacity * 0.10)), 5)
+        is_low = (0 < remaining <= threshold)
+        is_sold_out = (remaining == 0)
+
+        if event.registration_closes_at and now >= event.registration_closes_at:
+            cat_status = "REGISTRATION_CLOSED"
+        elif event.registration_opens_at and now < event.registration_opens_at:
+            cat_status = "REGISTRATION_NOT_OPEN"
+        elif is_sold_out:
+            cat_status = "SOLD_OUT"
+        elif is_low:
+            cat_status = "LOW_SEATS"
+        else:
+            cat_status = "AVAILABLE"
+
+        category_stats.append(
+            CategoryAvailabilityOut(
+                category_id=cat.id,
+                name=cat.name,
+                base_price_paise=cat.base_price_paise,
+                capacity=cat.capacity,
+                confirmed=conf_count,
+                held=held_count,
+                remaining=remaining,
+                is_sold_out=is_sold_out,
+                is_low_seats=is_low,
+                status=cat_status,
+            )
+        )
+
+    # Waitlist count
+    wl_stmt = select(func.count(TicketWaitlistEntry.id)).where(
+        TicketWaitlistEntry.event_id == event.id,
+        TicketWaitlistEntry.status == "waiting",
+    )
+    waitlist_count = int(await db.scalar(wl_stmt) or 0)
+
+    # Event-level totals
+    overall_cap = event.registration_capacity or (sum(c.capacity for c in categories) if categories else None)
+    total_allocated = total_confirmed + total_held
+    remaining_overall = max(0, overall_cap - total_allocated) if overall_cap is not None else None
+
+    is_sold_out_overall = (remaining_overall == 0) if remaining_overall is not None else False
+    if overall_cap:
+        thresh_overall = min(max(1, int(overall_cap * 0.10)), 5)
+        is_low_overall = (0 < remaining_overall <= thresh_overall)
+    else:
+        is_low_overall = any(c.is_low_seats for c in category_stats)
+
+    is_reg_closed = bool(event.registration_closes_at and now >= event.registration_closes_at)
+    is_reg_not_open = bool(event.registration_opens_at and now < event.registration_opens_at)
+
+    if is_reg_closed:
+        event_status = "REGISTRATION_CLOSED"
+        status_label = "Registration Closed"
+    elif is_reg_not_open:
+        event_status = "REGISTRATION_NOT_OPEN"
+        status_label = "Registration Not Open"
+    elif is_sold_out_overall:
+        event_status = "SOLD_OUT"
+        status_label = "Sold Out"
+    elif is_low_overall:
+        event_status = "LOW_SEATS"
+        status_label = f"Low Seats Left ({remaining_overall} remaining)"
+    else:
+        event_status = "AVAILABLE"
+        status_label = "Open for Registrations"
+
+    return EventRegistrationStatsOut(
+        event_id=event.id,
+        capacity=overall_cap,
+        confirmed_registrations=total_confirmed,
+        pending_held_seats=total_held,
+        total_allocated=total_allocated,
+        remaining_seats=remaining_overall,
+        is_low_seats=is_low_overall,
+        is_sold_out=is_sold_out_overall,
+        is_registration_closed=is_reg_closed,
+        is_registration_not_open=is_reg_not_open,
+        status=event_status,
+        status_label=status_label,
+        categories=category_stats,
+        waitlist_count=waitlist_count,
+    )
+

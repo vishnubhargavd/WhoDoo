@@ -7,7 +7,9 @@ See migrations/000_shared_placeholders.sql. Only app/services/shared_directory.p
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Text
+from decimal import Decimal
+
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -55,4 +57,8 @@ class Event(Base):
     venue: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, server_default="draft")
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    budget_inr: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    registration_capacity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    registration_opens_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    registration_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = updated_at_col()

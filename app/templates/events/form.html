@@ -38,6 +38,20 @@
       </label>
       {% endif %}
     </div>
+    <div class="fields">
+      <label>Event budget (INR)
+        <input type="number" step="0.01" min="0" name="budget_inr" value="{{ event.budget_inr if event else '0' }}" placeholder="e.g. 50000">
+      </label>
+      <label>Registration capacity
+        <input type="number" min="1" name="registration_capacity" value="{{ event.registration_capacity or '' if event else '' }}" placeholder="e.g. 100">
+      </label>
+      <label>Registration opens
+        <input type="datetime-local" name="registration_opens_at" value="{{ event.registration_opens_at | ist_input if event else '' }}">
+      </label>
+      <label>Registration deadline
+        <input type="datetime-local" name="registration_closes_at" value="{{ event.registration_closes_at | ist_input if event else '' }}">
+      </label>
+    </div>
     {% if user.role != "president" %}<p class="muted">You will lead this event. Only the president can hand it to someone else.</p>{% endif %}
     <div class="actions">
       <button type="submit">{{ "Save changes" if event else "Create draft" }}</button>

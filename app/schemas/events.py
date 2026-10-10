@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -37,7 +38,7 @@ class _Input(BaseModel):
     # Unknown fields (club_id, status, created_by...) are rejected, never silently trusted.
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    @field_validator("starts_at", "ends_at", check_fields=False)
+    @field_validator("starts_at", "ends_at", "registration_opens_at", "registration_closes_at", check_fields=False)
     @classmethod
     def _aware(cls, value):
         return as_aware(value)
@@ -56,6 +57,10 @@ class EventCreate(_Input):
     ends_at: datetime
     venue: str | None = Field(None, max_length=120)
     lead_id: uuid.UUID | None = None
+    budget_inr: Decimal = Field(default=Decimal("0.00"), ge=0)
+    registration_capacity: int | None = Field(default=None, ge=1)
+    registration_opens_at: datetime | None = None
+    registration_closes_at: datetime | None = None
 
     @model_validator(mode="after")
     def _window(self):
@@ -73,6 +78,10 @@ class EventUpdate(_Input):
     ends_at: datetime | None = None
     venue: str | None = Field(None, max_length=120)
     lead_id: uuid.UUID | None = None
+    budget_inr: Decimal | None = Field(default=None, ge=0)
+    registration_capacity: int | None = Field(default=None, ge=1)
+    registration_opens_at: datetime | None = None
+    registration_closes_at: datetime | None = None
 
     @model_validator(mode="after")
     def _window(self):
@@ -130,10 +139,57 @@ class EventOut(BaseModel):
     created_by_name: str | None = None
     created_at: datetime
     updated_at: datetime
+    budget_inr: Decimal = Decimal("0.00")
+    registration_capacity: int | None = None
+    registration_opens_at: datetime | None = None
+    registration_closes_at: datetime | None = None
     can_manage: bool = False
     allowed_statuses: list[str] = []
     progress: TaskProgress | None = None
     crew: list[CrewMember] = []
+
+
+class CategoryAvailabilityOut(BaseModel):
+    category_id: uuid.UUID
+    name: str
+    base_price_paise: int
+    capacity: int
+    confirmed: int
+    held: int
+    remaining: int
+    is_sold_out: bool
+    is_low_seats: bool
+    status: Literal["AVAILABLE", "LOW_SEATS", "SOLD_OUT", "REGISTRATION_CLOSED", "REGISTRATION_NOT_OPEN"]
+
+
+class EventRegistrationStatsOut(BaseModel):
+    event_id: uuid.UUID
+    capacity: int | None
+    confirmed_registrations: int
+    pending_held_seats: int
+    total_allocated: int
+    remaining_seats: int | None
+    is_low_seats: bool
+    is_sold_out: bool
+    is_registration_closed: bool
+    is_registration_not_open: bool
+    status: Literal["AVAILABLE", "LOW_SEATS", "SOLD_OUT", "REGISTRATION_CLOSED", "REGISTRATION_NOT_OPEN"]
+    status_label: str
+    categories: list[CategoryAvailabilityOut]
+    waitlist_count: int
+
+
+class EventBudgetDashboardOut(BaseModel):
+    event_id: uuid.UUID
+    event_name: str
+    budget_allocated_inr: Decimal
+    expenses_approved_inr: Decimal
+    expenses_paid_inr: Decimal
+    expenses_pending_inr: Decimal
+    remaining_budget_inr: Decimal
+    is_over_budget: bool
+    over_budget_amount_inr: Decimal
+
 
 
 # --- Event Autopilot and SyncSphere -----------------------------------------------

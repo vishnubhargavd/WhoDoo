@@ -112,6 +112,11 @@ def _why_not_on_sale(
         return "category_closed", "This ticket category is not on sale."
     # The category's own window, never wider than the event's.
     opens, closes = ticket_service.effective_window(settings, category)
+    if event.registration_opens_at and opens < event.registration_opens_at:
+        opens = event.registration_opens_at
+    if event.registration_closes_at and closes > event.registration_closes_at:
+        closes = event.registration_closes_at
+
     if now < opens:
         return "booking_not_open", "Booking for this ticket category has not opened yet."
     if now >= closes or now >= event.starts_at:
@@ -428,6 +433,8 @@ async def reserve(
     event_categories = list(await session.scalars(select(TicketCategory.id).where(TicketCategory.event_id == event.id)))
     counts = await occupied_seats(session, event_categories, now)
     available = min(category.capacity - counts[category.id], ticket_settings.capacity - sum(counts.values()))
+    if event.registration_capacity is not None:
+        available = min(available, event.registration_capacity - sum(counts.values()))
     if available < data.quantity:
         raise conflict(
             "sold_out",

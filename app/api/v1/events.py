@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.dependencies import CurrentUser, get_current_user, get_db
 from app.schemas.crewpulse import TaskCreate, TaskOut
 from app.schemas.events import (
+    EventBudgetDashboardOut,
     EventCreate,
     EventOut,
+    EventRegistrationStatsOut,
     EventStatusChange,
     EventUpdate,
     ReadinessOut,
@@ -138,3 +140,20 @@ async def create_task(
     task = await task_service.create_task(db, user, event, body)
     await db.commit()
     return (await task_service.to_out(db, user, [task]))[0]
+
+
+@router.get("/{event_id}/budget", response_model=EventBudgetDashboardOut, tags=["Event Management"])
+async def event_budget(
+    event_id: uuid.UUID, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> EventBudgetDashboardOut:
+    """Authoritative event-specific financial dashboard: budget allocated, expenses approved, paid, pending, remaining, and over-budget warning."""
+    return await event_service.get_event_budget_dashboard(db, user, event_id)
+
+
+@router.get("/{event_id}/registration-stats", response_model=EventRegistrationStatsOut, tags=["Event Management"])
+async def event_registration_stats(
+    event_id: uuid.UUID, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> EventRegistrationStatsOut:
+    """Calculated registration counts, category availability, low-seat warnings, and waitlist state."""
+    return await event_service.get_event_registration_stats(db, user, event_id)
+
