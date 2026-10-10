@@ -15,6 +15,7 @@ from app.api.v1 import (
     merch,
     payments,
     tasks,
+    upi,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -36,4 +37,5 @@ api_router.include_router(membercore.router)
 api_router.include_router(announcements.router)
 api_router.include_router(certidoo.router)
 api_router.include_router(legacyvault.router)
+api_router.include_router(upi.router)
 

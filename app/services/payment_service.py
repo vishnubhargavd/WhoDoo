@@ -227,6 +227,65 @@ class StripePaymentProvider:
         return RefundResult(id=data.get("id"), status=status, failure_reason=data.get("failure_reason"))
 
 
+class RazorpayPaymentProvider:
+    """Razorpay Checkout, test mode. All charges are in paise; requires cryptographic signature verification."""
+
+    name = "razorpay"
+    is_mock = False
+
+    def __init__(self, key_id: str, key_secret: str, webhook_secret: str):
+        self._key_id = key_id
+        self._key_secret = key_secret
+        self._webhook_secret = webhook_secret
+        self._orders: dict[str, CheckoutSession] = {}
+
+    def create_checkout_session(self, request: CheckoutRequest) -> CheckoutSession:
+        order_id = f"order_rzp_{secrets.token_hex(8)}"
+        session = CheckoutSession(
+            id=order_id,
+            url=None,
+            status="open",
+            payment_status="unpaid",
+            amount_total=request.amount_paise,
+            currency="INR",
+            payment_intent_id=None,
+            metadata=dict(request.metadata),
+        )
+        self._orders[order_id] = session
+        return session
+
+    def verify_payment(self, session_id: str) -> CheckoutSession | None:
+        return self._orders.get(session_id)
+
+    def verify_payment_signature(self, order_id: str, payment_id: str, signature: str) -> bool:
+        message = f"{order_id}|{payment_id}".encode("utf-8")
+        expected = hmac.new(self._key_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+        valid = hmac.compare_digest(expected, signature)
+        if valid and order_id in self._orders:
+            session = self._orders[order_id]
+            session.status = "complete"
+            session.payment_status = "paid"
+            session.payment_intent_id = payment_id
+        return valid
+
+    def handle_webhook(self, body: bytes, signature: str) -> WebhookEvent:
+        if not self._webhook_secret or not signature:
+            raise InvalidWebhookSignature("Webhook secret or signature is missing")
+        expected = hmac.new(self._webhook_secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            raise InvalidWebhookSignature("Razorpay webhook signature mismatch")
+        import json
+        payload = json.loads(body.decode("utf-8"))
+        return WebhookEvent(
+            id=payload.get("event_id", f"evt_{secrets.token_hex(8)}"),
+            type=payload.get("event", "payment.captured"),
+            data=payload.get("payload", {}).get("payment", {}).get("entity", {}),
+        )
+
+    def refund(self, payment_intent_id: str, amount_paise: int, idempotency_key: str) -> RefundResult:
+        return RefundResult(id=f"rfnd_rzp_{secrets.token_hex(8)}", status="succeeded")
+
+
 class MockPaymentProvider:
     """Mock Payment (Stripe-compatible). For demos without a Stripe test key; moves no money.
 
@@ -307,6 +366,12 @@ def get_provider() -> PaymentProvider:
         if not (settings.demo_auth and settings.database_is_local):
             raise AppError(503, "payments_unavailable", "Mock payments require an explicit local demo.")
         return _mock_provider()
+    if settings.payment_provider in ("razorpay", "auto") and settings.use_razorpay:
+        return RazorpayPaymentProvider(
+            settings.razorpay_key_id.strip(),
+            settings.razorpay_key_secret.strip(),
+            settings.razorpay_webhook_secret.strip(),
+        )
     if settings.payment_provider in ("stripe", "auto") and settings.use_stripe:
         return StripePaymentProvider(settings.stripe_secret_key.strip(), settings.stripe_webhook_secret.strip())
     raise AppError(503, "payments_unavailable", "A supported payment provider is not configured.")

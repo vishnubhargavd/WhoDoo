@@ -48,7 +48,12 @@ class Settings(BaseSettings):
     stripe_publishable_key: str = ""
     stripe_webhook_secret: str = ""
     mock_webhook_secret: str = "whsec_mock_secret"
-    # Where Stripe sends the buyer back to after paying.
+    # Razorpay test mode settings
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    razorpayx_account_number: str = ""
+    # Where Stripe / Razorpay sends the buyer back to after paying.
     app_base_url: str = "http://127.0.0.1:8000"
 
     # FairSeat ticket booking. Off by default: the routes answer 404 until it is switched on.
@@ -102,7 +107,16 @@ class Settings(BaseSettings):
         key = self.stripe_secret_key.strip()
         return key.startswith(("sk_test_", "rk_test_")) and "REPLACE" not in key
 
+    @property
+    def use_razorpay(self) -> bool:
+        if self.payment_provider == "mock":
+            return False
+        key = self.razorpay_key_id.strip()
+        return key.startswith("rzp_test_") and bool(self.razorpay_key_secret.strip())
+
     def check(self) -> None:
+        if self.razorpay_key_id.strip().startswith("rzp_live_"):
+            raise RuntimeError("Production Razorpay keys (rzp_live_) are strictly forbidden. Only test mode is allowed.")
         if self.supabase_jwt_secret:
             raise RuntimeError(
                 "SUPABASE_JWT_SECRET is not used and must be removed: Supabase tokens are verified with "
