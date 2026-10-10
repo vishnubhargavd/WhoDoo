@@ -130,3 +130,157 @@ Shared files changed (small, additive, **need team approval**):
 - Member 1: ticket prices, capacity and attendance belong in your own tables, keyed by `events.id`. Please don't add them as columns on `events`.
 - Member 3: `seed_finance_demo.py` crashes printing `₹` on Windows consoles (the data is already saved by then). Set `PYTHONIOENCODING=utf-8` as a workaround.
 - Event audit entries (`event_created`, `event_updated`, `event_status_changed`) reuse Member 3's `audit_logs` table through `audit_service.record`.
+
+---
+
+# FairSeat event side (Member 2) — ticket configuration, discovery, lifecycle protection
+
+**Status: proposed, pending team approval.** Migration `012_event_tickets.sql` has only been applied to
+disposable local databases. It has not been applied to any shared database. Bookings, holds,
+payments, refunds and tickets are not part of this work: Member 3 owns reservations and payments,
+and Ameer owns MemberCore pricing and the FairSeat/GateSync UI.
+
+## Decisions taken
+
+| Topic | Decision |
+|---|---|
+| Capacity | **Strict partition.** `event_ticket_settings.capacity` is split exactly across categories. A category can never exceed the event, and the categories together can never exceed it. A smaller total is allowed only while sales are off, and is shown as a warning. |
+| Hidden category | Paused, not deleted. It keeps its seats and its id. |
+| Member pricing | Not computed here. `member_discount_eligible` per category says whether MemberCore's discount applies; MemberCore stays the only discount engine. |
+| Money | Integer paise, 0 – 10,000,000 (₹1,00,000) per ticket, INR only. Strict integers: `"100"`, `99.5` and `true` are rejected. |
+| Booking window | `opens_at <= now < closes_at` (open inclusive, close exclusive, the same as `booking-rules.ts`), and `closes_at <= event.starts_at`. Bookings only on **published** events with `sales_enabled`. |
+| Discovery read policy | Signed-in members of the event's own club only (no anonymous or public reads until a policy is approved). Only published events with sales on, not yet ended, with at least one visible category. Drafts are never listed, not even for organizers. |
+| Who configures | `can_manage`: the club president, or the event's lead. Others get 403; other clubs and drafts they can't see get 404. |
+| Lifecycle | Locks **fail closed** while booked seats are unknown (see below). |
+
+## Schema (`migrations/012_event_tickets.sql`, additive)
+
+```sql
+event_ticket_settings (                       -- one row per ticketed event; THE capacity lock row
+  event_id uuid PK, club_id uuid NOT NULL,
+  FOREIGN KEY (event_id, club_id) REFERENCES events (id, club_id) ON DELETE CASCADE,
+  sales_enabled boolean NOT NULL DEFAULT false,
+  capacity integer NOT NULL CHECK (1..100000),
+  opens_at timestamptz NOT NULL, closes_at timestamptz NOT NULL CHECK (closes_at > opens_at),
+  max_per_booking integer NOT NULL DEFAULT 10 CHECK (1..100),
+  sales_activated_at timestamptz,             -- first time sales were live on a published event; never cleared
+  created_by, updated_by uuid NOT NULL, created_at, updated_at timestamptz)
+
+event_ticket_categories (
+  id uuid PK, event_id uuid, club_id uuid,
+  FOREIGN KEY (event_id, club_id) REFERENCES event_ticket_settings (event_id, club_id) ON DELETE CASCADE,
+  name text CHECK (2..60 chars), UNIQUE (event_id, lower(btrim(name))),
+  description text (<= 300), price_paise bigint CHECK (0..10000000), capacity integer CHECK (1..100000),
+  member_discount_eligible boolean DEFAULT true, is_visible boolean DEFAULT true, sort_order smallint)
+```
+
+- `events_id_club_key` is a unique index on `events (id, club_id)`. It lets the composite FKs prove that the copied `club_id` equals the event's club.
+- Deferred constraint triggers enforce the partition as a backstop to the service checks.
+- Existing events get no row, which means "not configured". No existing row or column changes. I tested the upgrade on a seeded 000–011 database: the `events` rows were byte-identical before and after.
+- Migration numbering stays in Member 2's `010–019` range.
+
+## API (all under `/api/v1`, signed-in only)
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | `/events/{id}/tickets` | Organizers | Config, `sale_state`, `locked`, `warnings`, `seats_committed` (null = unknown) |
+| PUT | `/events/{id}/tickets` | Organizers | Replaces the whole configuration. Send the category `id` to keep a category; leaving an existing id out removes that category. |
+| GET | `/discovery/events` | Club members | Published + on-sale events of the caller's club, soonest first |
+| GET | `/discovery/events/{id}` | Club members | 404 for drafts, other clubs, sales off |
+
+Page: `/events/{id}/tickets` (organizers only). The event page also shows a "FairSeat · tickets" card to organizers.
+
+PUT body:
+
+```json
+{"sales_enabled": true, "capacity": 150, "opens_at": "2026-10-12T10:00", "closes_at": "2026-10-20T18:00:00+05:30",
+ "max_per_booking": 4,
+ "categories": [{"id": "<existing uuid, optional>", "name": "General", "price_paise": 25000, "capacity": 120,
+                 "member_discount_eligible": true, "is_visible": true, "description": null}]}
+```
+
+Times without an offset are read as IST. Responses are always UTC. Errors use the shared envelope
+`{"error": {"code", "message", "details": [{"code", "message"}, ...]}}`. The codes are `category_over_capacity`,
+`over_allocated`, `unallocated_seats`, `no_categories`, `window_after_start`, `missing_schedule`, `event_closed`,
+`unknown_category`, `duplicate_category` (400/409), the lock codes below (409), and 422 for invalid input.
+
+Discovery item (what FairSeat consumes):
+
+```json
+{"id": "uuid", "club_id": "uuid", "name": "Bake Sale", "description": "...", "venue": "Campus Quad",
+ "starts_at": "2026-10-17T04:30:00Z", "ends_at": "2026-10-17T10:30:00Z", "status": "published",
+ "booking_opens_at": "...Z", "booking_closes_at": "...Z", "sale_state": "not_open | open | closed",
+ "availability": "unavailable",
+ "categories": [{"id": "uuid", "name": "General", "description": null, "price_paise": 25000, "currency": "INR",
+                 "member_discount_eligible": true, "capacity": 120, "max_per_booking": 4, "seats_remaining": null}]}
+```
+
+`capacity` is the configured total. `seats_remaining` stays `null` and `availability` stays `"unavailable"` until
+the reservation service reports real counts. Nothing is estimated.
+
+## Lifecycle protection
+
+`locked` = `sales_activated_at` is set **and** `now >= opens_at`, meaning bookings may exist. The ticket service
+reads booked seats only through `app/services/ticket_inventory.committed_seats()`, which returns `None` (unknown)
+today. While the event is locked:
+
+| Change | Unknown seats (today) | Seats known (after Member 3) |
+|---|---|---|
+| Event to `draft` | 409 `ticket_sales_started` | allowed only if 0 committed |
+| Event to `cancelled` | 409 `cancellation_requires_refunds` | allowed only if 0 committed; otherwise via the refund workflow |
+| Event to `completed` | allowed | allowed |
+| Change event start/end | 409 `ticket_sales_started` | allowed only if 0 committed |
+| Venue, description, lead | allowed | allowed |
+| Reduce capacity / category seats | 409 `capacity_locked` / `category_locked` | allowed down to committed seats |
+| Remove a category | 409 `category_locked` (hide it instead) | allowed if that category has 0 committed |
+| Move `opens_at` | 409 `window_locked` | 409 |
+| Add seats, change price (future buyers), hide, pause sales, move `closes_at` (no later than start) | allowed | allowed |
+
+Even before sales open, rescheduling an event so it starts before `closes_at` is refused
+(`booking_window_conflict`). Nothing is silently clamped. Publishing an event with sales on re-checks the
+configuration (`ticket_config_invalid`) and sets `sales_activated_at`.
+
+## For Member 3 (reservations, payments, refunds)
+
+1. **Lock boundary.** Every writer that consumes or releases seats runs
+   `SELECT ... FROM event_ticket_settings WHERE event_id = $1 FOR UPDATE` first. Ticket-setting edits and event
+   status/schedule changes take the same lock (event row, then settings row), so they serialize with reservations.
+2. **Inside that transaction, re-check:** event `status = 'published'`, `sales_enabled`,
+   `opens_at <= now < closes_at`, `now < starts_at`, category `is_visible`, and that the category belongs to the
+   event. Then check `committed(category) + quantity <= category.capacity`. Under strict partition the per-category
+   check is sufficient. Also check `quantity <= max_per_booking`.
+3. **References.** Bookings should FK `event_ticket_categories (id)` with `ON DELETE RESTRICT`, plus `events (id)`.
+   Store a price snapshot; prices here can change for future buyers.
+4. **Implement `ticket_inventory.committed_seats(db, event_id)`.** Return confirmed seats plus unexpired holds per
+   category id. Once it returns real numbers, the locks relax automatically, and the two pending tests in
+   `tests/test_event_tickets.py` should be filled in.
+5. **Cancellation.** The event cancellation endpoint refuses ticketed, locked events. The approved refund workflow
+   should refund and revoke first (`record_refund`, GateSync revocation), then cancel the event (committed seats
+   = 0, so it is allowed), or expose its own cancel operation that does both in one transaction. Event Management
+   never changes payment state.
+
+## For Ameer (FairSeat UI)
+
+Map `DiscoveryEventOut` to `EventView` in the server adapter (`server-integration.ts`): `eventId` from `id`,
+`title` from `name`, `startsAt`/`endsAt` via `new Date(x).toISOString()` (the backend sends `...Z` without
+milliseconds, while `parseEvents` requires `.sssZ`), `saleState` from `sale_state` (`not_open` maps to `closed`),
+`categoryId` from `id`, `basePricePaise` from `price_paise`, `maxQuantity` from `max_per_booking`, and
+`availability` from `seats_remaining` (null).
+
+**Required change:** `parseEvents` rejects the whole listing if any `description` is null or empty. Events may
+have no description, so map `null` to a placeholder or relax the check.
+
+MemberCore pricing input: `basePricePaise = price_paise`, `eventClubId = club_id`. Skip the discount when
+`member_discount_eligible` is false. Authentication is unchanged: FastAPI still verifies its own JWT
+(`sub` = `users.id`). The Supabase identity mapping is still an open team decision.
+
+## Files (this change)
+
+New: `migrations/012_event_tickets.sql`, `app/models/tickets.py`, `app/schemas/tickets.py`,
+`app/services/ticket_rules.py`, `app/services/ticket_service.py`, `app/services/ticket_inventory.py`,
+`app/api/v1/event_tickets.py`, `app/templates/events/tickets.html`, `app/static/tickets.js`,
+`tests/test_event_tickets.py`.
+
+Changed: `app/services/event_service.py` (two guard calls), `app/web/event_pages.py` (page, paise filters),
+`app/templates/events/detail.html` (organizer card), `app/static/events.css`, and `app/api/v1/__init__.py`
+(router registration; this is a shared file).

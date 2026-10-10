@@ -133,6 +133,24 @@
 </div>
 {% endif %}
 
+{% if organizer %}
+{# ---- FairSeat ticket settings (organizers only) ---- #}
+<section class="card" aria-labelledby="tickets-title">
+  <div class="actions" style="justify-content: space-between">
+    <h2 id="tickets-title">FairSeat · tickets <span class="badge {{ tickets.sale_state }}">{{ tickets.sale_state | label }}</span></h2>
+    <a class="button secondary small" href="/events/{{ event.id }}/tickets">Ticket settings</a>
+  </div>
+  {% if tickets.configured %}
+  <div class="meta"><span>{{ tickets.capacity }} seats</span><span>{{ tickets.categories | length }} categories</span>
+    <span>Booking {{ tickets.opens_at | ist('%d %b, %H:%M') }} – {{ tickets.closes_at | ist('%d %b, %H:%M') }} IST</span>
+    {% if tickets.locked %}<span class="badge needs_attention">Sales started</span>{% endif %}</div>
+  {% if tickets.warnings %}<p class="muted" style="margin: 8px 0 0">{{ tickets.warnings | map(attribute="message") | join(" · ") }}</p>{% endif %}
+  {% else %}
+  <p class="empty">No ticketing yet. Set capacity, categories, prices and the booking window.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {# ---- CrewPulse ---- #}
 <section class="card" aria-labelledby="tasks-title">
   <div class="actions" style="justify-content: space-between">

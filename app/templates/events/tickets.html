@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Tickets · {{ event.name }} · WhoDoo{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/events.css">
+<p><a href="/events/{{ event.id }}">← {{ event.name }}</a></p>
+<h1>Ticket settings <span class="badge {{ tickets.sale_state }}">{{ tickets.sale_state | label }}</span></h1>
+<p class="sub">FairSeat · {{ event.name }} · starts {{ event.starts_at | ist }}{% if event.starts_at %} IST{% endif %}.
+  Prices are the standard price; MemberCore applies member discounts. Times are in IST.</p>
+
+{% if tickets.locked %}
+<div class="notice info">Ticket sales have started, so tickets may already be booked. You can add seats, change prices for
+  future buyers, hide a category or pause sales. Reducing seats, removing a category, moving the opening time, rescheduling,
+  cancelling or returning the event to draft need the booking workflow first.</div>
+{% endif %}
+{% if tickets.warnings %}
+<ul class="notice info ticket-warnings" aria-label="Warnings">
+  {% for w in tickets.warnings %}<li>{{ w.message }}</li>{% endfor %}
+</ul>
+{% endif %}
+
+<div class="grid two">
+  <section class="card" aria-labelledby="summary-title">
+    <h2 id="summary-title">Current configuration</h2>
+    {% if tickets.configured %}
+    <dl class="kv">
+      <dt>Sales</dt><dd>{{ "On" if tickets.sales_enabled else "Off" }}</dd>
+      <dt>Capacity</dt><dd>{{ tickets.capacity }} seats ({{ tickets.allocated }} in categories)</dd>
+      <dt>Booking opens</dt><dd>{{ tickets.opens_at | ist }} IST</dd>
+      <dt>Booking closes</dt><dd>{{ tickets.closes_at | ist }} IST</dd>
+      <dt>Per booking</dt><dd>Up to {{ tickets.max_per_booking }} tickets</dd>
+      <dt>Seats booked</dt><dd>{{ tickets.seats_committed if tickets.seats_committed is not none else "Not available yet (reservation service not connected)" }}</dd>
+    </dl>
+    {% else %}
+    <p class="empty">Ticketing is not set up for this event.</p>
+    {% endif %}
+  </section>
+  <section class="card" aria-labelledby="categories-title">
+    <h2 id="categories-title">Categories</h2>
+    {% if tickets.categories %}
+    <table>
+      <thead><tr><th>Category</th><th class="num">Price</th><th class="num">Seats</th></tr></thead>
+      <tbody>
+        {% for c in tickets.categories %}
+        <tr>
+          <td>{{ c.name }}{% if not c.is_visible %} <span class="badge draft">Hidden</span>{% endif %}
+            {% if not c.member_discount_eligible %}<div class="muted" style="font-size: 12px">No member discount</div>{% endif %}</td>
+          <td class="num">{{ c.price_paise | paise }}</td>
+          <td class="num">{{ c.capacity }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No categories yet.</p>
+    {% endif %}
+  </section>
+</div>
+
+{% if editable %}
+<section class="card" aria-labelledby="edit-title">
+  <h2 id="edit-title">{{ "Edit" if tickets.configured else "Set up" }} ticketing</h2>
+  <form id="ticket-form" class="stack" action="/api/v1/events/{{ event.id }}/tickets">
+    <label class="check"><input type="checkbox" name="sales_enabled" {% if tickets.sales_enabled %}checked{% endif %}>
+      Sell tickets (they go on sale once the event is published and booking opens)</label>
+    <div class="fields">
+      <label>Total seats <input type="number" name="total_capacity" min="1" max="100000" step="1" required
+             value="{{ tickets.capacity or '' }}"></label>
+      <label>Booking opens <input type="datetime-local" name="opens_at" required value="{{ tickets.opens_at | ist_input }}"></label>
+      <label>Booking closes <input type="datetime-local" name="closes_at" required
+             value="{{ tickets.closes_at | ist_input if tickets.closes_at else event.starts_at | ist_input }}"></label>
+      <label>Most tickets per booking <input type="number" name="max_per_booking" min="1" max="100" step="1" required
+             value="{{ tickets.max_per_booking or 10 }}"></label>
+    </div>
+
+    <div class="table-wrap">
+      <table class="ticket-categories">
+        <thead><tr><th>Category</th><th>Price (₹)</th><th>Seats</th><th>Member discount</th><th>Visible</th><th></th></tr></thead>
+        <tbody>
+          {% for c in tickets.categories %}
+          <tr data-id="{{ c.id }}">
+            <td><input type="text" name="name" minlength="2" maxlength="60" required value="{{ c.name }}" aria-label="Category name"></td>
+            <td><input type="text" name="price" inputmode="decimal" required value="{{ c.price_paise | paise_input }}" aria-label="Price in rupees"></td>
+            <td><input type="number" name="capacity" min="1" max="100000" step="1" required value="{{ c.capacity }}" aria-label="Seats"></td>
+            <td><input type="checkbox" name="member_discount_eligible" {% if c.member_discount_eligible %}checked{% endif %} aria-label="Member discount applies"></td>
+            <td><input type="checkbox" name="is_visible" {% if c.is_visible %}checked{% endif %} aria-label="Visible to buyers"></td>
+            <td><button type="button" class="small secondary" data-remove-row>Remove</button></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <template id="category-row">
+      <tr>
+        <td><input type="text" name="name" minlength="2" maxlength="60" required placeholder="e.g. General" aria-label="Category name"></td>
+        <td><input type="text" name="price" inputmode="decimal" required placeholder="250.00" aria-label="Price in rupees"></td>
+        <td><input type="number" name="capacity" min="1" max="100000" step="1" required aria-label="Seats"></td>
+        <td><input type="checkbox" name="member_discount_eligible" checked aria-label="Member discount applies"></td>
+        <td><input type="checkbox" name="is_visible" checked aria-label="Visible to buyers"></td>
+        <td><button type="button" class="small secondary" data-remove-row>Remove</button></td>
+      </tr>
+    </template>
+    <p class="muted" id="allocation" aria-live="polite"></p>
+    <div class="actions">
+      <button type="button" class="secondary" data-add-row>Add category</button>
+      <button type="submit">Save ticket settings</button>
+      <a href="/events/{{ event.id }}">Back to event</a>
+    </div>
+  </form>
+</section>
+{% else %}
+<p class="empty">A {{ event.status }} event's ticket settings can no longer be changed.</p>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="/static/events.js"></script><script src="/static/tickets.js"></script>{% endblock %}

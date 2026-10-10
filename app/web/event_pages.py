@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db
 from app.core.errors import forbidden
-from app.services import event_service, task_service
+from app.services import event_service, task_service, ticket_service
 from app.services.syncsphere import IST
-from app.web.templating import render, templates
+from app.web.templating import inr, render, templates
 
 router = APIRouter(include_in_schema=False)
 
@@ -27,8 +27,20 @@ def ist_input(value: datetime | None) -> str:
     return value.astimezone(IST).strftime("%Y-%m-%dT%H:%M") if value else ""
 
 
+def paise(value: int | None) -> str:
+    """Integer paise as rupees, e.g. 25050 -> ₹250.50 (exact: no floating point)."""
+    return "—" if value is None else inr(f"{value // 100}.{value % 100:02d}")
+
+
+def paise_input(value: int) -> str:
+    """Value for the rupee price input: 25050 -> 250.50"""
+    return f"{value // 100}.{value % 100:02d}"
+
+
 templates.env.filters["ist"] = ist
 templates.env.filters["ist_input"] = ist_input
+templates.env.filters["paise"] = paise
+templates.env.filters["paise_input"] = paise_input
 
 
 @router.get("/events")
@@ -76,8 +88,20 @@ async def event_detail_page(
             schedule=await event_service.schedule_check(db, user, event),
             people=await task_service.assignable_people(db, user.club_id),
             missing=event_service.missing_for_publish(event),
+            tickets=await ticket_service.config_out(db, event, can_manage=True),
         )
     return render(request, "events/detail.html", user, **context)
+
+
+@router.get("/events/{event_id}/tickets")
+async def ticket_settings_page(
+    event_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    """FairSeat ticket settings. Organizers only, like the API behind it."""
+    event = await event_service.get_managed_event(db, user, event_id)
+    tickets = await ticket_service.config_out(db, event, can_manage=True)
+    return render(request, "events/tickets.html", user, event=event, tickets=tickets,
+                  editable=event.status in ("draft", "published"))
 
 
 @router.get("/my-tasks")
