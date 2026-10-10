@@ -209,9 +209,11 @@ async def create_event(db: AsyncSession, user: CurrentUser, data: EventCreate, n
     if lead_id:
         await _check_lead(db, user.club_id, lead_id)
 
+    venue = check_venue_approved(data.venue) if data.venue else None
+
     event = Event(
         club_id=user.club_id, name=data.name, description=data.description, starts_at=data.starts_at,
-        ends_at=data.ends_at, venue=data.venue, lead_id=lead_id, status="draft", created_by=user.id,
+        ends_at=data.ends_at, venue=venue, lead_id=lead_id, status="draft", created_by=user.id,
     )
     _sync_event_date(event)
     db.add(event)
@@ -219,6 +221,21 @@ async def create_event(db: AsyncSession, user: CurrentUser, data: EventCreate, n
     audit_service.record(db, club_id=user.club_id, actor_id=user.id, action="event_created",
                          entity_type="event", entity_id=event.id, details={"name": event.name})
     return event
+
+
+def check_venue_approved(venue: str | None) -> str | None:
+    if not venue:
+        return None
+    trimmed = venue.strip()
+    from app.core.config import get_settings
+    approved = get_settings().get_approved_venues()
+    match = next((v for v in approved if v.lower() == trimmed.lower()), None)
+    if not match:
+        raise bad_request(
+            "unapproved_venue",
+            f"'{venue}' is not an approved campus venue. Please select an approved venue: {', '.join(approved)}"
+        )
+    return match
 
 
 async def update_event(
@@ -232,6 +249,9 @@ async def update_event(
     changes = data.model_dump(exclude_unset=True)
     if not changes:
         return event
+
+    if "venue" in changes and changes["venue"]:
+        changes["venue"] = check_venue_approved(changes["venue"])
 
     if "lead_id" in changes and changes["lead_id"] != event.lead_id:
         if user.role != ROLE_PRESIDENT:

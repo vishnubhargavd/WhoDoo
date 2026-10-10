@@ -9,6 +9,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.dependencies import CurrentUser, get_current_user, get_db
 from app.core.errors import AppError, forbidden
 from app.services import event_service, expense_service, task_service, ticket_service
@@ -61,7 +62,8 @@ async def new_event_page(request: Request, user: CurrentUser = Depends(get_curre
     if not event_service.can_create(user):
         raise forbidden("Only the president or an event lead can create events")
     leads = await event_service.list_leads(db, user.club_id)
-    return render(request, "events/form.html", user, event=None, leads=leads)
+    venues = get_settings().get_approved_venues()
+    return render(request, "events/form.html", user, event=None, leads=leads, venues=venues)
 
 
 @router.get("/events/{event_id}/edit")
@@ -70,7 +72,8 @@ async def edit_event_page(
 ):
     event = await event_service.get_managed_event(db, user, event_id)
     leads = await event_service.list_leads(db, user.club_id)
-    return render(request, "events/form.html", user, event=event, leads=leads)
+    venues = get_settings().get_approved_venues()
+    return render(request, "events/form.html", user, event=event, leads=leads, venues=venues)
 
 
 @router.get("/events/{event_id}")

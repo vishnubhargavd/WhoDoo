@@ -48,6 +48,7 @@ class _Input(BaseModel):
         return value or None
 
 
+
 class EventCreate(_Input):
     name: str = Field(min_length=3, max_length=120)
     description: str | None = Field(None, max_length=2000)
