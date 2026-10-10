@@ -127,25 +127,15 @@ def _fallback(reason: str) -> OcrResult:
     return OcrResult(raw={"engine": None, "reason": reason, "at": datetime.now().isoformat(timespec="seconds")})
 
 
-def read_receipt(data: bytes, content_type: str) -> OcrResult:
-    """Run OCR on an uploaded receipt. Blocking: call it through a thread pool."""
-    if content_type == "application/pdf":
-        return _fallback("pdf_not_supported")
-    try:
-        import pytesseract
-        from PIL import Image, ImageOps
+# Page segmentation modes to try, in order. 4 (one column of text) suits most receipts;
+# 6 (one uniform block) rescues layouts where 4 drops lines.
+SEGMENTATION_MODES = (4, 6)
 
-        image = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("L")
-        if max(image.size) < 1400:  # small phone crops read much better when enlarged
-            scale = 1400 / max(image.size)
-            image = image.resize((round(image.width * scale), round(image.height * scale)))
-        image = ImageOps.autocontrast(image)
 
-        words = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT, config="--psm 6")
-    except Exception as exc:  # Tesseract missing, corrupt image, timeout: all mean "type it in"
-        logger.warning("OCR unavailable: %s", exc)
-        return _fallback(f"ocr_failed: {type(exc).__name__}")
+def _read_once(image, mode: int) -> OcrResult | None:
+    import pytesseract
 
+    words = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT, config=f"--psm {mode}")
     lines: dict[tuple, list[str]] = {}
     confidences: list[float] = []
     for index, word in enumerate(words["text"]):
@@ -155,11 +145,10 @@ def read_receipt(data: bytes, content_type: str) -> OcrResult:
         key = (words["block_num"][index], words["par_num"][index], words["line_num"][index])
         lines.setdefault(key, []).append(word)
         confidences.append(confidence)
+    if not confidences:
+        return None
 
     text = "\n".join(" ".join(parts) for parts in lines.values())
-    if not confidences:
-        return _fallback("no_text_found")
-
     vendor, amount, expense_date = parse_receipt_text(text)
     mean_confidence = Decimal(str(sum(confidences) / len(confidences))).quantize(Decimal("0.01"))
     return OcrResult(
@@ -168,6 +157,36 @@ def read_receipt(data: bytes, content_type: str) -> OcrResult:
         vendor=vendor,
         amount=amount,
         expense_date=expense_date,
-        raw={"engine": "tesseract", "text": text, "word_count": len(confidences),
+        raw={"engine": "tesseract", "segmentation_mode": mode, "text": text, "word_count": len(confidences),
              "mean_word_confidence": float(mean_confidence)},
     )
+
+
+def _fields_found(result: OcrResult) -> int:
+    return sum(value is not None for value in (result.vendor, result.amount, result.expense_date))
+
+
+def read_receipt(data: bytes, content_type: str) -> OcrResult:
+    """Run OCR on an uploaded receipt. Blocking: call it through a thread pool."""
+    if content_type == "application/pdf":
+        return _fallback("pdf_not_supported")
+    try:
+        from PIL import Image, ImageOps
+
+        image = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("L")
+        if max(image.size) < 1400:  # small phone crops read much better when enlarged
+            scale = 1400 / max(image.size)
+            image = image.resize((round(image.width * scale), round(image.height * scale)))
+        image = ImageOps.autocontrast(image)
+
+        best: OcrResult | None = None
+        for mode in SEGMENTATION_MODES:
+            result = _read_once(image, mode)
+            if result and (best is None or _fields_found(result) > _fields_found(best)):
+                best = result
+            if best and _fields_found(best) == 3:
+                break
+    except Exception as exc:  # Tesseract missing, corrupt image, timeout: all mean "type it in"
+        logger.warning("OCR unavailable: %s", exc)
+        return _fallback(f"ocr_failed: {type(exc).__name__}")
+    return best or _fallback("no_text_found")
