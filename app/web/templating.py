@@ -7,6 +7,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.core.config import get_settings
 from app.core.dependencies import CurrentUser
+from app.services import payment_service
 
 APP_DIR = Path(__file__).resolve().parents[1]
 templates = Jinja2Templates(directory=APP_DIR / "templates")
@@ -120,7 +121,7 @@ def render(request: Request, name: str, user: CurrentUser | None = None, status_
     context.update(
         user=user,
         demo_auth=settings.demo_auth,
-        mock_payments=not settings.use_razorpay,
+        mock_payments=payment_service.get_provider().is_mock,
         nav=navigation(user, request.url.path),
         path=request.url.path,
         status_code=status_code,

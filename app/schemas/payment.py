@@ -6,31 +6,31 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.schemas.merch import OrderOut
 
 
-class CreatePaymentOrder(BaseModel):
+class CreateCheckoutSession(BaseModel):
+    """Only which order to pay for. The amount, buyer and items come from the order row."""
+
     merch_order_id: uuid.UUID
 
 
-class PaymentOrderOut(BaseModel):
-    """What the checkout needs. The amount is the server's figure for the order, in paise."""
+class CheckoutSessionOut(BaseModel):
+    """Where to send the buyer. The amount is the server's figure for the order, in paise."""
 
     merch_order_id: uuid.UUID
     order_number: str
-    provider: Literal["razorpay", "mock"]
+    provider: Literal["stripe", "mock"]
     is_mock: bool
-    key_id: str = Field(description="Public key for Razorpay Checkout")
-    razorpay_order_id: str
-    amount: int = Field(description="In paise, as Razorpay expects")
+    session_id: str
+    checkout_url: str = Field(description="Stripe's hosted checkout page, or the local mock checkout")
+    amount: int = Field(description="In paise, as Stripe expects")
     currency: str
 
 
 class VerifyPayment(BaseModel):
-    """The three fields Razorpay Checkout hands back. No amount or status is accepted from the client."""
+    """Only the Checkout Session id. No amount or status is accepted from the client."""
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    razorpay_order_id: str = Field(min_length=5, max_length=80)
-    razorpay_payment_id: str = Field(min_length=5, max_length=80)
-    razorpay_signature: str = Field(min_length=10, max_length=200)
+    session_id: str = Field(min_length=5, max_length=200)
 
 
 class VerifyPaymentOut(BaseModel):
@@ -39,10 +39,15 @@ class VerifyPaymentOut(BaseModel):
 
 
 class MockSimulate(BaseModel):
-    razorpay_order_id: str
+    session_id: str = Field(min_length=5, max_length=200)
     outcome: Literal["success", "failure"] = "success"
 
 
+class MockSimulateOut(BaseModel):
+    session_id: str
+    payment_status: Literal["paid", "unpaid"]
+
+
 class WebhookAck(BaseModel):
-    status: Literal["processed", "ignored"]
+    status: Literal["processed", "ignored", "duplicate"]
     detail: str | None = None

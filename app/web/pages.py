@@ -273,16 +273,48 @@ async def my_orders(request: Request, user: CurrentUser = Depends(get_current_us
     return render(request, "orders.html", user, orders=orders)
 
 
+@router.get("/orders/{order_id}")
+async def order_detail(
+    order_id: uuid.UUID,
+    request: Request,
+    session_id: str | None = None,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Order confirmation. Stripe sends the buyer back here with `session_id`; the payment is
+    checked with the provider before the page is drawn, so a refresh simply checks again."""
+    order = await merch_service.get_order(db, user, order_id)
+    problem = None
+    waiting = order.payment_status in ("pending", "failed") and order.status == "created"
+    if session_id and waiting and order.user_id == user.id and session_id == order.stripe_checkout_session_id:
+        try:
+            outcome = await payment_service.verify_payment(db, user, session_id)
+            await db.commit()
+            problem = outcome.error
+        except AppError as exc:
+            await db.rollback()
+            problem = exc
+        order = await merch_service.get_order(db, user, order_id)
+    return render(
+        request, "order_detail.html", user, order=order, problem=problem,
+        is_owner=order.user_id == user.id, just_paid=bool(session_id) and problem is None and order.payment_status == "paid",
+    )
+
+
 @router.get("/checkout/{order_id}")
 async def checkout(
     order_id: uuid.UUID,
     request: Request,
+    cancelled: bool = False,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     order = await merch_service.get_order(db, user, order_id)
     provider = payment_service.get_provider()
-    return render(request, "checkout.html", user, order=order, provider=provider, is_owner=order.user_id == user.id)
+    return render(
+        request, "checkout.html", user, order=order, provider=provider, is_owner=order.user_id == user.id,
+        cancelled=cancelled,
+    )
 
 
 @router.get("/admin/merch")

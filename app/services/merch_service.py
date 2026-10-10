@@ -7,6 +7,7 @@ Stock rules:
   transaction that marks the order paid and writes the ledger entry. Two buyers
   racing for the last item cannot both succeed.
 * Cancelling a paid order puts the stock back and writes a refund entry.
+* A payment for an order that can no longer be filled is refunded; no stock moves.
 """
 
 import secrets
@@ -19,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import get_settings
 from app.core.dependencies import FINANCE_ADMINS, CurrentUser
 from app.core.errors import bad_request, conflict, forbidden, not_found
 from app.models.merch import MerchOrder, MerchProduct, OrderItem, ProductVariant
@@ -34,6 +36,8 @@ from app.schemas.merch import (
     VariantUpdate,
 )
 from app.services import audit_service, ledger_service, shared_directory
+
+SALES_CATEGORY = "merchandise_sales"
 
 WITH_VARIANTS = selectinload(MerchProduct.variants)
 WITH_ITEMS = selectinload(MerchOrder.items).selectinload(OrderItem.variant).selectinload(ProductVariant.product)
@@ -242,8 +246,9 @@ async def present_orders(session: AsyncSession, orders: list[MerchOrder]) -> lis
             total_amount=order.total_amount,
             payment_status=order.payment_status,
             status=order.status,
-            razorpay_order_id=order.razorpay_order_id,
-            razorpay_payment_id=order.razorpay_payment_id,
+            currency=order.currency,
+            stripe_checkout_session_id=order.stripe_checkout_session_id,
+            stripe_payment_intent_id=order.stripe_payment_intent_id,
             event_id=order.event_id,
             items=[
                 OrderItemOut(
@@ -317,7 +322,8 @@ async def create_order(session: AsyncSession, user: CurrentUser, data: OrderCrea
 
     order = MerchOrder(
         id=uuid.uuid4(), club_id=user.club_id, user_id=user.id, order_number=_order_number(),
-        total_amount=Decimal("0"), payment_status="created", status="created", event_id=data.event_id,
+        total_amount=Decimal("0"), currency=get_settings().currency, payment_status="pending", status="created",
+        event_id=data.event_id,
     )
     items = []
     for variant_id, quantity in quantities.items():
@@ -364,8 +370,61 @@ async def get_order(session: AsyncSession, user: CurrentUser, order_id: uuid.UUI
 # --- Payment outcomes (called by payment_service) --------------------------------------
 
 
+def _summary(order: MerchOrder) -> str:
+    return ", ".join(f"{item.quantity} x {item.variant.product.name}" for item in order.items)
+
+
+async def _record_sale(session: AsyncSession, order: MerchOrder, payment_intent_id: str, actor_id: uuid.UUID) -> None:
+    """One income entry per payment: the key makes a second call for the same payment a no-op."""
+    await ledger_service.record_income(
+        session,
+        club_id=order.club_id,
+        source_module="merchandise",
+        amount=order.total_amount,
+        created_by=actor_id,
+        reference_id=order.id,
+        reference_type="merch_order",
+        payer_id=order.user_id,
+        event_id=order.event_id,
+        category=SALES_CATEGORY,
+        description=f"Merchandise purchase: {_summary(order)} (order {order.order_number})",
+        payment_status="paid",
+        idempotency_key=f"{payment_intent_id}:income",
+    )
+
+
+async def _record_refund(
+    session: AsyncSession, order: MerchOrder, actor_id: uuid.UUID, description: str, *, approved_by: uuid.UUID | None = None
+) -> None:
+    await ledger_service.record_refund(
+        session,
+        club_id=order.club_id,
+        source_module="merchandise",
+        amount=order.total_amount,
+        created_by=actor_id,
+        approved_by=approved_by,
+        reference_id=order.id,
+        reference_type="merch_order",
+        payee_id=order.user_id,
+        event_id=order.event_id,
+        category=SALES_CATEGORY,
+        description=description,
+        idempotency_key=f"{order.stripe_payment_intent_id}:refund",
+    )
+
+
+async def _restock(session: AsyncSession, order: MerchOrder) -> None:
+    for item in order.items:
+        await session.execute(
+            update(ProductVariant)
+            .where(ProductVariant.id == item.product_variant_id)
+            .values(stock_quantity=ProductVariant.stock_quantity + item.quantity)
+            .execution_options(synchronize_session=False)
+        )
+
+
 async def fulfil_paid_order(
-    session: AsyncSession, order: MerchOrder, payment_id: str, *, actor_id: uuid.UUID
+    session: AsyncSession, order: MerchOrder, payment_intent_id: str, *, actor_id: uuid.UUID
 ) -> MerchOrder:
     """Mark a locked order paid, take the stock and record the income, all or nothing.
 
@@ -391,39 +450,63 @@ async def fulfil_paid_order(
 
     order.payment_status = "paid"
     order.status = "paid"
-    order.razorpay_payment_id = payment_id
+    order.stripe_payment_intent_id = payment_intent_id
     await session.flush()
 
-    summary = ", ".join(f"{item.quantity} x {item.variant.product.name}" for item in order.items)
-    await ledger_service.record_income(
-        session,
-        club_id=order.club_id,
-        source_module="merchandise",
-        amount=order.total_amount,
-        created_by=actor_id,
-        reference_id=order.id,
-        reference_type="merch_order",
-        payer_id=order.user_id,
-        event_id=order.event_id,
-        category="merchandise",
-        description=f"Order {order.order_number}: {summary}",
-        payment_status="paid",
-        idempotency_key=f"{payment_id}:income",
-    )
+    await _record_sale(session, order, payment_intent_id, actor_id)
     audit_service.record(
         session, club_id=order.club_id, actor_id=actor_id, action="merch.order_paid",
         entity_type="merch_order", entity_id=order.id,
-        details={"payment_id": payment_id, "amount": str(order.total_amount)},
+        details={"payment_intent_id": payment_intent_id, "amount": str(order.total_amount)},
+    )
+    return order
+
+
+async def refund_unfilled_order(
+    session: AsyncSession, order: MerchOrder, payment_intent_id: str, *, actor_id: uuid.UUID, reason: str
+) -> MerchOrder:
+    """The buyer paid but the order cannot be filled (sold out, or closed meanwhile).
+
+    No stock was taken. The ledger shows the money arriving and going straight back, so it
+    agrees with the provider's records. The caller sends the refund through the provider.
+    """
+    order.stripe_payment_intent_id = payment_intent_id
+    order.payment_status = "refunded"
+    order.status = "cancelled"
+    await session.flush()
+    await _record_sale(session, order, payment_intent_id, actor_id)
+    await _record_refund(session, order, actor_id, f"Refund for order {order.order_number}: {reason}")
+    audit_service.record(
+        session, club_id=order.club_id, actor_id=actor_id, action="merch.order_refunded_unfilled",
+        entity_type="merch_order", entity_id=order.id,
+        details={"payment_intent_id": payment_intent_id, "reason": reason},
+    )
+    return order
+
+
+async def record_external_refund(session: AsyncSession, order: MerchOrder) -> MerchOrder:
+    """A paid order was refunded in full outside the app (Stripe Dashboard). Match it here."""
+    if order.payment_status != "paid":
+        return order
+    if order.status != "delivered":
+        await _restock(session, order)
+        order.status = "cancelled"
+    order.payment_status = "refunded"
+    await session.flush()
+    await _record_refund(session, order, order.user_id, f"Refund issued by the payment provider for order {order.order_number}")
+    audit_service.record(
+        session, club_id=order.club_id, actor_id=None, action="merch.order_refunded_by_provider",
+        entity_type="merch_order", entity_id=order.id, details={"payment_intent_id": order.stripe_payment_intent_id},
     )
     return order
 
 
 def mark_payment_failed(session: AsyncSession, order: MerchOrder, reason: str, *, actor_id: uuid.UUID | None) -> None:
-    """A failed payment closes the order. Stock was never taken, so there is nothing to put back."""
-    if order.payment_status == "paid" or order.status != "created":
+    """Note a declined payment. The order stays open, because the buyer can try again with
+    another card. Stock was never taken, so there is nothing to put back."""
+    if order.payment_status in ("paid", "refunded") or order.status != "created":
         return
     order.payment_status = "failed"
-    order.status = "cancelled"
     audit_service.record(
         session, club_id=order.club_id, actor_id=actor_id, action="merch.payment_failed",
         entity_type="merch_order", entity_id=order.id, details={"reason": reason},
@@ -453,27 +536,9 @@ async def update_status(
     refund_due = False
     if new_status == "cancelled":
         if order.payment_status == "paid":
-            for item in order.items:
-                await session.execute(
-                    update(ProductVariant)
-                    .where(ProductVariant.id == item.product_variant_id)
-                    .values(stock_quantity=ProductVariant.stock_quantity + item.quantity)
-                    .execution_options(synchronize_session=False)
-                )
-            await ledger_service.record_refund(
-                session,
-                club_id=order.club_id,
-                source_module="merchandise",
-                amount=order.total_amount,
-                created_by=user.id,
-                approved_by=user.id,
-                reference_id=order.id,
-                reference_type="merch_order",
-                payee_id=order.user_id,
-                event_id=order.event_id,
-                category="merchandise",
-                description=f"Refund for cancelled order {order.order_number}",
-                idempotency_key=f"{order.razorpay_payment_id}:refund",
+            await _restock(session, order)
+            await _record_refund(
+                session, order, user.id, f"Refund for cancelled order {order.order_number}", approved_by=user.id
             )
             order.payment_status = "refunded"
             refund_due = True

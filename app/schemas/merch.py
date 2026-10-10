@@ -137,8 +137,9 @@ class OrderOut(BaseModel):
     total_amount: Money
     payment_status: OrderPaymentStatus
     status: OrderStatus
-    razorpay_order_id: str | None
-    razorpay_payment_id: str | None
+    currency: str = "INR"
+    stripe_checkout_session_id: str | None
+    stripe_payment_intent_id: str | None
     event_id: uuid.UUID | None
     items: list[OrderItemOut]
     created_at: datetime

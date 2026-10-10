@@ -85,7 +85,7 @@ async def update_variant(
 async def create_order(
     body: OrderCreate, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> OrderOut:
-    """Create an unpaid order. Pay for it through /api/v1/payments/razorpay/create-order."""
+    """Create an unpaid order. Pay for it through /api/v1/payments/stripe/create-checkout-session."""
     order = await merch_service.create_order(db, user, body)
     await db.commit()
     return await merch_service.get_order(db, user, order.id)
@@ -119,7 +119,10 @@ async def update_order_status(
     if refund_due:
         # Refund at the provider before committing: if it fails, the cancellation is rolled back.
         await run_in_threadpool(
-            payment_service.get_provider().refund, order.razorpay_payment_id, int(order.total_amount * 100)
+            payment_service.get_provider().refund,
+            order.stripe_payment_intent_id,
+            int(order.total_amount * 100),
+            f"{order.stripe_payment_intent_id}:refund",
         )
     await db.commit()
     return await merch_service.get_order(db, user, order_id)

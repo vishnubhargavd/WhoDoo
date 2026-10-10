@@ -91,7 +91,7 @@ async def test_store_and_merch_admin_pages(client, world, auth):
     assert detail.status_code == 200 and "10 left" in detail.text
     checkout = await client.get(f"/checkout/{order['id']}")
     assert checkout.status_code == 200
-    assert "Mock Payment (Razorpay-compatible)" in checkout.text and "mock success" in checkout.text
+    assert "Mock Payment (Stripe-compatible)" in checkout.text and "mock success" in checkout.text
     mine = await client.get("/orders")
     assert mine.status_code == 200 and order["order_number"] in mine.text and "Pay now" in mine.text
     assert (await client.get("/admin/merch")).status_code == 403

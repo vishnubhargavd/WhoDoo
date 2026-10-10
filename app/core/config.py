@@ -29,30 +29,32 @@ class Settings(BaseSettings):
     expense_auto_approval_limit: Decimal = Decimal("1000")
     currency: str = "INR"
 
+    # stripe | mock | auto. Stripe is only used with a test-mode secret key; anything
+    # else falls back to the mock provider, so a missing key never breaks checkout.
     payment_provider: str = "auto"
-    razorpay_key_id: str = ""
-    razorpay_key_secret: str = ""
-    razorpay_webhook_secret: str = ""
-    mock_payment_secret: str = "mock_key_secret"
-    mock_webhook_secret: str = "mock_webhook_secret"
+    stripe_secret_key: str = ""
+    stripe_publishable_key: str = ""
+    stripe_webhook_secret: str = ""
+    mock_webhook_secret: str = "whsec_mock_secret"
+    # Where Stripe sends the buyer back to after paying.
+    app_base_url: str = "http://127.0.0.1:8000"
 
     @property
     def token_secret(self) -> str:
         return self.supabase_jwt_secret or self.jwt_secret
 
     @property
-    def use_razorpay(self) -> bool:
+    def use_stripe(self) -> bool:
         if self.payment_provider == "mock":
             return False
-        return bool(self.razorpay_key_id and self.razorpay_key_secret)
+        key = self.stripe_secret_key.strip()
+        return key.startswith(("sk_test_", "rk_test_")) and "REPLACE" not in key
 
     def check(self) -> None:
         if not self.demo_auth and self.token_secret == DEFAULT_JWT_SECRET:
             raise RuntimeError(
                 "JWT_SECRET (or SUPABASE_JWT_SECRET) must be set when DEMO_AUTH is off"
             )
-        if self.payment_provider == "razorpay" and not self.use_razorpay:
-            raise RuntimeError("PAYMENT_PROVIDER=razorpay needs RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET")
 
 
 @lru_cache

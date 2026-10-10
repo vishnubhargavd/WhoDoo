@@ -27,7 +27,6 @@ from app.db.migrate import run_migrations  # noqa: E402
 from app.models.shared import Club, Event, User  # noqa: E402
 from app.schemas.expense import ExpenseClaimCreate  # noqa: E402
 from app.schemas.merch import OrderCreate, OrderItemIn, ProductCreate, VariantCreate  # noqa: E402
-from app.schemas.payment import VerifyPayment  # noqa: E402
 from app.services import expense_service, ledger_service, merch_service, payment_service  # noqa: E402
 from scripts.make_sample_receipts import draw  # noqa: E402
 
@@ -190,7 +189,6 @@ async def seed(session) -> None:
         variants=[variant("Standard", "White", "MUG-WHT", 20)],
     ))
     sku = {v.sku: v.id for product in (hoodie, tee, mug) for v in product.variants}
-    provider = payment_service.get_provider()
 
     async def order(buyer: User, lines: list[tuple[str, int]], outcome: str = "paid", event: Event | None = None):
         placed = await merch_service.create_order(session, acting(buyer), OrderCreate(
@@ -199,9 +197,9 @@ async def seed(session) -> None:
         ))
         if outcome == "unpaid":
             return placed
-        payment = await payment_service.create_payment_order(session, acting(buyer), placed.id)
-        simulated = provider.simulate_payment(payment.razorpay_order_id, succeed=outcome != "failed")
-        await payment_service.verify_payment(session, acting(buyer), VerifyPayment(**simulated))
+        checkout = await payment_service.create_checkout_session(session, acting(buyer), placed.id)
+        await payment_service.simulate_mock_payment(session, acting(buyer), checkout.session_id, outcome != "failed")
+        await payment_service.verify_payment(session, acting(buyer), checkout.session_id)
         for step in {"packed": ["packed"], "delivered": ["packed", "delivered"], "refunded": ["cancelled"]}.get(outcome, []):
             await merch_service.update_status(session, t, placed.id, step)
         return placed
