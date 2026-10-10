@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.common import Money, ORMModel, PositiveMoney
 
@@ -106,6 +106,8 @@ class EventProfitLoss(BaseModel):
 
 
 class ManualEntryCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
     entry_type: Literal["income", "expense", "adjustment"]
     amount: PositiveMoney
     description: str = Field(min_length=3, max_length=500)

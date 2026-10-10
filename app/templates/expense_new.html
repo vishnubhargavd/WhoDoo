@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Submit expense · WhoDoo Finance{% endblock %}
+{% block content %}
+<h1>Submit an expense</h1>
+<p class="sub">Upload the receipt, check what we read from it, then submit. Claims of {{ approval_limit | inr }} or more need two approvals.</p>
+
+<div class="grid two">
+  <div class="card">
+    <h2>1. Receipt</h2>
+    <div class="stack">
+      <label>Receipt photo or PDF
+        <input type="file" id="receipt-file" accept="image/png,image/jpeg,image/webp,application/pdf">
+      </label>
+      <div class="actions">
+        <button type="button" id="read-receipt">Read receipt</button>
+        <span class="muted">PNG, JPEG, WebP or PDF, up to 8 MB.</span>
+      </div>
+      <div id="ocr-status" class="notice info" hidden></div>
+      <img id="receipt-preview" class="receipt" alt="Receipt preview" hidden>
+      <p class="muted">No receipt handy? Try the <a href="/static/samples/receipt_bake_sale_850.png" download>₹850 sample</a>
+        or the <a href="/static/samples/receipt_stage_decor_2500.png" download>₹2,500 sample</a>.</p>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2. Claim details</h2>
+    <form id="claim-form" class="stack">
+      <input type="hidden" name="receipt_id">
+      <label>Title <input type="text" name="title" minlength="3" maxlength="120" required placeholder="e.g. Bake sale supplies"></label>
+      <div class="fields">
+        <label>Amount (₹) <input type="number" name="amount" min="0.01" step="0.01" required></label>
+        <label>Date of expense <input type="date" name="expense_date" required></label>
+        <label>Category
+          <select name="category" required>
+            {% for value in categories %}<option value="{{ value }}">{{ value | label }}</option>{% endfor %}
+          </select>
+        </label>
+        <label>Event
+          <select name="event_id">
+            <option value="">Not for an event</option>
+            {% for event in events %}<option value="{{ event.id }}">{{ event.name }}</option>{% endfor %}
+          </select>
+        </label>
+      </div>
+      <label>Vendor <input type="text" name="vendor_name" maxlength="120" placeholder="Shop or supplier"></label>
+      <label>Description <textarea name="description" minlength="3" required placeholder="What was bought and why"></textarea></label>
+      <div class="actions">
+        <button type="submit" id="submit-claim" disabled>Submit claim</button>
+        <span class="muted" id="submit-hint">Read a receipt first.</span>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const fileInput = document.getElementById("receipt-file");
+  const statusBox = document.getElementById("ocr-status");
+  const preview = document.getElementById("receipt-preview");
+  const form = document.getElementById("claim-form");
+  const submitButton = document.getElementById("submit-claim");
+
+  document.getElementById("read-receipt").addEventListener("click", async (event) => {
+    if (!fileInput.files.length) { showMessage("Choose a receipt file first."); return; }
+    const button = event.target;
+    button.disabled = true;
+    statusBox.hidden = false;
+    statusBox.className = "notice info";
+    statusBox.textContent = "Reading the receipt…";
+    try {
+      const body = new FormData();
+      body.append("file", fileInput.files[0]);
+      const result = await api("POST", "/api/v1/expenses/ocr", body);
+
+      form.receipt_id.value = result.receipt_id;
+      // Only fill what OCR found, and never overwrite something already typed.
+      if (result.extracted_amount && !form.amount.value) form.amount.value = result.extracted_amount.toFixed(2);
+      if (result.extracted_date && !form.expense_date.value) form.expense_date.value = result.extracted_date;
+      if (result.extracted_vendor && !form.vendor_name.value) form.vendor_name.value = result.extracted_vendor;
+
+      statusBox.className = "notice " + (result.ocr_available ? "ok" : "info");
+      statusBox.textContent = result.message +
+        (result.ocr_available ? ` OCR confidence: ${Math.round(result.ocr_confidence)}%.` : "");
+      if (/\.(png|jpe?g|webp)(\?|$)/i.test(result.receipt_url)) {
+        preview.src = result.receipt_url;
+        preview.hidden = false;
+      } else {
+        preview.hidden = true;
+      }
+      submitButton.disabled = false;
+      document.getElementById("submit-hint").textContent = "Check the details, then submit.";
+      document.getElementById("flash").hidden = true;
+    } catch (error) {
+      statusBox.hidden = true;
+      showMessage(error.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    submitButton.disabled = true;
+    try {
+      const claim = await api("POST", "/api/v1/expenses", formToJson(form));
+      window.location.href = "/expenses/" + claim.id;
+    } catch (error) {
+      showMessage(error.message);
+      submitButton.disabled = false;
+    }
+  });
+</script>
+{% endblock %}

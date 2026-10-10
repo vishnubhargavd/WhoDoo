@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}{{ claim.title }} · WhoDoo Finance{% endblock %}
+{% block content %}
+<div class="actions" style="justify-content: space-between">
+  <div>
+    <h1>{{ claim.title }} <span class="badge {{ claim.status }}">{{ claim.status | label }}</span></h1>
+    <p class="sub">Submitted by {{ claim.submitted_by_name }} on {{ claim.created_at | nice_date }}</p>
+  </div>
+  {% include "_claim_actions.html" %}
+</div>
+
+{% if claim.status == "pending_approval" %}
+<div class="notice info">
+  Waiting for {{ "final approval" if claim.approval_stage == "final" else "approval" }}
+  from {{ claim.current_approver_name or "the treasurer" }}.
+  {% if claim.needs_final_approval and claim.approval_stage == "first" %}
+    At {{ approval_limit | inr }} or more, the treasurer or president must then give final approval.
+  {% endif %}
+</div>
+{% elif claim.status == "rejected" %}
+<div class="notice error">Rejected: {{ claim.rejection_reason }}</div>
+{% elif claim.status == "approved" %}
+<div class="notice ok">Approved. The reimbursement is in the ledger and will reduce the balance once it is marked as paid.</div>
+{% elif claim.status == "paid" %}
+<div class="notice ok">Paid. The ledger balance reflects this reimbursement.</div>
+{% endif %}
+
+<div class="grid two">
+  <div class="card">
+    <h2>Claim</h2>
+    <dl class="kv">
+      <dt>Amount</dt><dd><strong>{{ claim.amount | inr }}</strong></dd>
+      <dt>Date of expense</dt><dd>{{ claim.expense_date | nice_date }}</dd>
+      <dt>Vendor</dt><dd>{{ claim.vendor_name or "—" }}</dd>
+      <dt>Category</dt><dd>{{ claim.category | label }}</dd>
+      <dt>Event</dt><dd>{{ claim.event_name or "—" }}</dd>
+      <dt>Description</dt><dd>{{ claim.description or "—" }}</dd>
+      <dt>Ledger</dt>
+      <dd>
+        {% if claim.ledger_payment_status %}
+          <span class="badge {{ claim.ledger_payment_status }}">Reimbursement {{ claim.ledger_payment_status }}</span>
+        {% else %}No entry yet (created on final approval){% endif %}
+      </dd>
+    </dl>
+
+    <h2 style="margin-top: 20px">What OCR read</h2>
+    {% if claim.ocr_confidence %}
+    <table>
+      <thead><tr><th>Field</th><th>From receipt</th><th>Submitted</th></tr></thead>
+      <tbody>
+        <tr><td>Vendor</td><td>{{ claim.extracted_vendor or "—" }}</td><td>{{ claim.vendor_name or "—" }}</td></tr>
+        <tr>
+          <td>Amount</td><td>{{ claim.extracted_amount | inr }}</td>
+          <td>{{ claim.amount | inr }}
+            {% if claim.extracted_amount is not none and claim.extracted_amount != claim.amount %}<span class="badge pending">Differs</span>{% endif %}
+          </td>
+        </tr>
+        <tr>
+          <td>Date</td><td>{{ claim.extracted_date | nice_date }}</td>
+          <td>{{ claim.expense_date | nice_date }}
+            {% if claim.extracted_date and claim.extracted_date != claim.expense_date %}<span class="badge pending">Differs</span>{% endif %}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="muted">OCR confidence: {{ claim.ocr_confidence | round | int }}%</p>
+    {% else %}
+    <p class="muted">The receipt could not be read automatically, so every field was entered by hand.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Receipt</h2>
+    {% if claim.receipt_url.lower().split("?")[0].endswith((".png", ".jpg", ".jpeg", ".webp")) %}
+      <a href="{{ claim.receipt_url }}" target="_blank" rel="noopener"><img class="receipt" src="{{ claim.receipt_url }}" alt="Receipt for {{ claim.title }}"></a>
+    {% else %}
+      <a class="button secondary" href="{{ claim.receipt_url }}" target="_blank" rel="noopener">Open receipt</a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Approval history</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>When</th><th>Who</th><th>Role</th><th>Action</th><th>Comment</th></tr></thead>
+      <tbody>
+        {% for log in claim.approval_history %}
+        <tr>
+          <td class="nowrap">{{ log.created_at | nice_date }}</td>
+          <td>{{ log.approver_name or "—" }}</td>
+          <td>{{ log.approver_role | label }}</td>
+          <td><span class="badge {{ log.action }}">{{ log.action | label }}</span></td>
+          <td>{{ log.comment or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if "resubmit" in claim.allowed_actions %}
+<div class="card">
+  <h2>Make changes and resubmit</h2>
+  <form data-api="POST" action="/api/v1/expenses/{{ claim.id }}/resubmit" class="stack">
+    <label>Title <input type="text" name="title" value="{{ claim.title }}" minlength="3" required></label>
+    <div class="fields">
+      <label>Amount (₹) <input type="number" name="amount" value="{{ claim.amount }}" min="0.01" step="0.01" required></label>
+      <label>Date of expense <input type="date" name="expense_date" value="{{ claim.expense_date }}" required></label>
+      <label>Category
+        <select name="category">
+          {% for value in categories %}<option value="{{ value }}" {{ "selected" if value == claim.category }}>{{ value | label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Event
+        <select name="event_id">
+          <option value="">Not for an event</option>
+          {% for event in events %}<option value="{{ event.id }}" {{ "selected" if event.id == claim.event_id }}>{{ event.name }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>Vendor <input type="text" name="vendor_name" value="{{ claim.vendor_name or '' }}"></label>
+    <label>Description <textarea name="description" minlength="3" required>{{ claim.description or "" }}</textarea></label>
+    <div class="actions"><button type="submit">Resubmit for approval</button></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

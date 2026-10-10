@@ -44,3 +44,32 @@ async def test_treasurer_pages_forbidden_for_volunteers(client, world):
     response = await client.get("/treasurer")
     assert response.status_code == 403
     assert "permission" in response.text or "roles" in response.text
+
+
+async def test_expense_pages(client, world, auth):
+    from tests.test_expenses import API, RECEIPT
+
+    upload = await client.post(f"{API}/ocr", headers=auth(world.volunteer), files={"file": ("r.png", RECEIPT, "image/png")})
+    created = await client.post(API, headers=auth(world.volunteer), json={
+        "receipt_id": upload.json()["receipt_id"], "title": "Stage decor", "description": "Backdrop and lights",
+        "category": "decoration", "amount": "2500", "expense_date": "2026-09-28", "event_id": str(world.fest.id),
+    })
+    claim_id = created.json()["id"]
+
+    client.cookies.update(_cookie(world.volunteer))
+    assert (await client.get("/expenses/new")).status_code == 200
+    mine = await client.get("/expenses")
+    assert mine.status_code == 200 and "Stage decor" in mine.text and "Lina Lead" in mine.text
+    detail = await client.get(f"/expenses/{claim_id}")
+    assert detail.status_code == 200 and "₹2,500.00" in detail.text
+    assert "data-post" not in detail.text  # the submitter gets no approval buttons
+    assert (await client.get("/expenses/approvals")).status_code == 403
+
+    client.cookies.update(_cookie(world.lead2))
+    queue = await client.get("/expenses/approvals")
+    assert queue.status_code == 200 and "First of two" in queue.text
+    assert f"/api/v1/expenses/{claim_id}/approve" in queue.text
+
+    await client.post(f"{API}/{claim_id}/request-changes", headers=auth(world.lead2), json={"comment": "Add the invoice"})
+    client.cookies.update(_cookie(world.volunteer))
+    assert "Resubmit for approval" in (await client.get(f"/expenses/{claim_id}")).text

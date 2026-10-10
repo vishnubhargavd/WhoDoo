@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}My expenses · WhoDoo Finance{% endblock %}
+{% block content %}
+<div class="actions" style="justify-content: space-between">
+  <div>
+    <h1>My expense claims</h1>
+    <p class="sub">Claims you have submitted and where each one stands.</p>
+  </div>
+  <a class="button" href="/expenses/new">Submit expense</a>
+</div>
+
+<div class="card">
+  {% if claims %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Submitted</th><th>Claim</th><th>Event</th><th>Category</th><th>Status</th><th>Waiting on</th><th class="num">Amount</th></tr></thead>
+      <tbody>
+        {% for claim in claims %}
+        <tr>
+          <td class="nowrap">{{ claim.created_at | nice_date }}</td>
+          <td><a href="/expenses/{{ claim.id }}">{{ claim.title }}</a></td>
+          <td>{{ claim.event_name or "—" }}</td>
+          <td>{{ claim.category | label }}</td>
+          <td><span class="badge {{ claim.status }}">{{ claim.status | label }}</span></td>
+          <td>
+            {% if claim.status == "pending_approval" %}{{ claim.current_approver_name or "Treasurer" }}
+            {% elif claim.status == "approved" %}Payment
+            {% elif claim.status == "change_requested" %}You
+            {% else %}—{% endif %}
+          </td>
+          <td class="num">{{ claim.amount | inr }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">You have not submitted any claims yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

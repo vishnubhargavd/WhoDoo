@@ -1,0 +1,22 @@
+{# Buttons for whatever the signed-in user may do to `claim` right now. #}
+{% set base = "/api/v1/expenses/" ~ claim.id %}
+<div class="actions">
+  {% if "approve" in claim.allowed_actions %}
+    <button class="small success" data-post="{{ base }}/approve"
+            data-confirm="Approve {{ claim.amount | inr }} for {{ claim.title }}?">
+      {{ "Give final approval" if claim.approval_stage == "final" else "Approve" }}
+    </button>
+  {% endif %}
+  {% if "request_changes" in claim.allowed_actions %}
+    <button class="small secondary" data-post="{{ base }}/request-changes"
+            data-prompt="What needs to change?" data-field="comment" data-required>Request changes</button>
+  {% endif %}
+  {% if "reject" in claim.allowed_actions %}
+    <button class="small danger" data-post="{{ base }}/reject"
+            data-prompt="Reason for rejecting" data-field="reason" data-required>Reject</button>
+  {% endif %}
+  {% if "mark_paid" in claim.allowed_actions %}
+    <button class="small success" data-post="{{ base }}/mark-paid"
+            data-confirm="Confirm that {{ claim.submitted_by_name }} has been paid {{ claim.amount | inr }}?">Mark as paid</button>
+  {% endif %}
+</div>
