@@ -56,3 +56,9 @@ details.add-task[open] summary { margin-bottom: 12px; }
 .ticket-warnings { margin-top: 0; padding-left: 32px; }
 .ticket-categories input[type=text], .ticket-categories input[type=number] { width: 100%; min-width: 90px; }
 .ticket-categories td { vertical-align: middle; }
+
+/* The event form: one grid per row of related fields. A column never goes narrower than a
+   date-and-time picker needs, and every control fills its column instead of spilling over. */
+.form-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); align-items: start; }
+.form-row > label { min-width: 0; }
+.form-row input, .form-row select { width: 100%; min-width: 0; box-sizing: border-box; }

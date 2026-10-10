@@ -16,10 +16,40 @@
     <label>Description
       <textarea name="description" maxlength="2000" placeholder="What is it, and who is it for?">{{ (event.description or '') if event else '' }}</textarea>
     </label>
-    <div class="fields">
+    {# Each row is its own grid, so related fields stay side by side and nothing is squeezed. #}
+    <div class="form-row">
       <label>Starts <input type="datetime-local" name="starts_at" required value="{{ event.starts_at | ist_input if event else '' }}"></label>
       <label>Ends <input type="datetime-local" name="ends_at" required value="{{ event.ends_at | ist_input if event else '' }}"></label>
-      <label>Venue <input type="text" name="venue" maxlength="120" value="{{ (event.venue or '') if event else '' }}" placeholder="e.g. Main Hall"></label>
+    </div>
+    <div class="form-row">
+      <label>Who can take part
+        <select name="registration_mode" id="registration-mode">
+          {% set mode = event.registration_mode if event else "free" %}
+          <option value="free" {{ "selected" if mode == "free" }}>Open to all students, free</option>
+          <option value="paid" {{ "selected" if mode == "paid" }}>Open to all students, paid</option>
+          <option value="none" {{ "selected" if mode == "none" }}>No online registration</option>
+        </select>
+      </label>
+      <label data-needs-registration>Number of participants
+        <input type="number" name="max_participants" id="max-participants" min="1" max="100000" step="1"
+               value="{{ (event.max_participants or '') if event else '' }}" placeholder="e.g. 120">
+      </label>
+      <label data-needs-paid>Ticket price (₹)
+        <input type="number" id="price-rupees" min="1" max="100000" step="0.01"
+               value="{{ (event.price_paise | paise_input) if event and event.price_paise else '' }}" placeholder="e.g. 150">
+        <input type="hidden" name="price_paise" id="price-paise" value="{{ event.price_paise if event and event.price_paise else '' }}">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>Venue
+        <select name="venue_id" id="venue-select">
+          <option value="" data-capacity="0">{{ ("Keep: " ~ event.venue) if event and event.venue and not event.venue_id else "Choose a venue" }}</option>
+          {% for venue in venues %}
+          <option value="{{ venue.id }}" data-capacity="{{ venue.capacity }}" {% if event and event.venue_id == venue.id %}selected{% endif %}>{{ venue.name }} · holds {{ venue.capacity }}</option>
+          {% endfor %}
+        </select>
+        <span class="muted" id="venue-hint">Only venues big enough for your participants are offered.</span>
+      </label>
       {% if user.role == "president" %}
       <label>Event lead
         <select name="lead_id">
@@ -38,4 +68,39 @@
     </div>
   </form>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+  // Offer only venues that hold the number of participants, and keep the price field in paise.
+  (() => {
+    const mode = document.getElementById("registration-mode");
+    const people = document.getElementById("max-participants");
+    const venue = document.getElementById("venue-select");
+    const rupees = document.getElementById("price-rupees");
+    const paise = document.getElementById("price-paise");
+    const hint = document.getElementById("venue-hint");
+    function refresh() {
+      const open = mode.value !== "none", paid = mode.value === "paid";
+      document.querySelectorAll("[data-needs-registration]").forEach((el) => { el.hidden = !open; });
+      document.querySelectorAll("[data-needs-paid]").forEach((el) => { el.hidden = !paid; });
+      people.required = open;
+      rupees.required = paid;
+      const wanted = open ? Number(people.value) || 0 : 0;
+      let fits = 0;
+      for (const option of venue.options) {
+        const capacity = Number(option.dataset.capacity);
+        const ok = !option.value || capacity >= wanted;
+        option.hidden = option.disabled = !ok;
+        if (option.value && ok) fits += 1;
+        if (!ok && option.selected) venue.value = "";
+      }
+      hint.textContent = wanted
+        ? (fits ? `${fits} venue${fits === 1 ? "" : "s"} can hold ${wanted} people.` : `No venue holds ${wanted} people. Lower the number.`)
+        : "Only venues big enough for your participants are offered.";
+      paise.value = paid && rupees.value ? String(Math.round(Number(rupees.value) * 100)) : "";
+    }
+    [mode, people, rupees].forEach((el) => el.addEventListener("input", refresh));
+    refresh();
+  })();
+</script>
 {% endblock %}

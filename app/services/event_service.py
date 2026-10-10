@@ -15,13 +15,14 @@ import uuid
 from dataclasses import replace
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import ROLE_EVENT_LEAD, ROLE_PRESIDENT, CurrentUser
 from app.core.errors import bad_request, conflict, forbidden, not_found
 from app.models.crewpulse import CrewTask
+from app.models.registration import LIVE, EventRegistration
 from app.models.shared import Event, User
 from app.schemas.events import (
     CrewMember,
@@ -33,7 +34,7 @@ from app.schemas.events import (
     TaskProgress,
     check_window,
 )
-from app.services import audit_service, autopilot, shared_directory, syncsphere, ticket_service
+from app.services import audit_service, autopilot, shared_directory, syncsphere, ticket_service, venue_service
 from app.services.syncsphere import IST
 
 TRANSITIONS = {
@@ -212,7 +213,9 @@ async def create_event(db: AsyncSession, user: CurrentUser, data: EventCreate, n
     event = Event(
         club_id=user.club_id, name=data.name, description=data.description, starts_at=data.starts_at,
         ends_at=data.ends_at, venue=data.venue, lead_id=lead_id, status="draft", created_by=user.id,
+        registration_mode="none", price_paise=0,
     )
+    await _apply_registration(db, event, data.model_dump(exclude_unset=True), now)
     _sync_event_date(event)
     db.add(event)
     await _flush_unique(db)
@@ -252,14 +255,67 @@ async def update_event(
 
     before = {key: str(getattr(event, key)) for key in changes}
     for key, value in changes.items():
-        setattr(event, key, value)
+        if key not in REGISTRATION_FIELDS:
+            setattr(event, key, value)
+    await _apply_registration(db, event, changes, now)
     if event.status == "published" and missing_for_publish(event):
         raise bad_request("missing_details", "A published event needs: " + ", ".join(missing_for_publish(event)))
+    if event.status == "published":
+        await venue_service.check_registration_setup(db, event)
     _sync_event_date(event)
     await _flush_unique(db)
     audit_service.record(db, club_id=user.club_id, actor_id=user.id, action="event_updated", entity_type="event",
                          entity_id=event.id, details={"before": before, "after": {k: str(v) for k, v in changes.items()}})
     return event
+
+
+REGISTRATION_FIELDS = ("venue_id", "registration_mode", "max_participants", "price_paise")
+
+
+async def _apply_registration(db: AsyncSession, event: Event, changes: dict, now: datetime) -> None:
+    """Apply the venue and public-registration fields of a create or update, keeping them consistent.
+
+    The venue's name is copied into `event.venue`, which is what schedule clash detection compares.
+    A free event has no price; an event without registration has no limit. Whether the setup is
+    complete (a venue big enough, a price if paid) is checked when the event is published.
+    """
+    if changes.get("venue_id"):
+        venue = await venue_service.get_venue(db, changes["venue_id"])
+        event.venue_id, event.venue = venue.id, venue.name
+    elif "venue_id" in changes or "venue" in changes:
+        event.venue_id = None   # a venue typed by hand is not one from the list
+    if not any(field in changes for field in REGISTRATION_FIELDS[1:]):
+        return
+    mode = changes.get("registration_mode") or event.registration_mode or "none"
+    limit = changes["max_participants"] if "max_participants" in changes else event.max_participants
+    price = changes["price_paise"] if changes.get("price_paise") is not None else (event.price_paise or 0)
+
+    taken = await db.scalar(
+        select(func.count()).select_from(EventRegistration)
+        .where(EventRegistration.event_id == event.id, EventRegistration.status.in_(LIVE))
+    ) if event.id else 0
+    if taken:
+        if mode != event.registration_mode:
+            raise conflict("registrations_exist", f"{taken} people have registered, so free/paid can no longer be changed.")
+        if mode == "paid" and price != event.price_paise:
+            raise conflict("registrations_exist", f"{taken} people have registered, so the price can no longer be changed.")
+        if limit is not None and limit < taken:
+            raise conflict("below_registered", f"{taken} people have already registered; the limit cannot go below that.")
+    if mode == "none":
+        limit, price = None, 0
+    else:
+        if not limit:
+            raise bad_request("participants_required", "Say how many participants this event can take.")
+        if mode == "paid" and not price:
+            raise bad_request("price_required", "A paid event needs a ticket price.")
+        if mode == "free":
+            price = 0
+        if ticket_service.enabled():
+            settings = await ticket_service.get_settings_row(db, event.id) if event.id else None
+            if settings is not None and settings.sales_enabled:
+                raise conflict("fairseat_in_use", "This event sells FairSeat tickets. Switch those off before "
+                                                  "opening public registration.")
+    event.registration_mode, event.max_participants, event.price_paise = mode, limit, price
 
 
 def missing_for_publish(event: Event) -> list[str]:
@@ -283,6 +339,7 @@ async def change_status(
             raise bad_request("missing_details", "Add these before publishing: " + ", ".join(missing), missing)
         if event.starts_at <= now:
             raise bad_request("start_in_past", "An event that has already started cannot be published")
+        await venue_service.check_registration_setup(db, event)
     if status == "completed" and not (event.starts_at and event.starts_at <= now):
         raise bad_request("not_started", "An event can only be completed after it starts")
     await ticket_service.guard_status_change(db, event, status, now)

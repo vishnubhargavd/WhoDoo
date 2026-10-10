@@ -158,6 +158,9 @@ async def save_config(
         raise not_found("Event")
     # Serialize with bookings and status changes: event row, settings row, category rows.
     await ticket_locks.lock_event(db, event.id)
+    if data.sales_enabled and event.registration_mode != "none":
+        raise conflict("public_registration_in_use", "This event takes public registrations. Switch those off "
+                                                     "before selling FairSeat tickets.")
     settings = await ticket_locks.lock_settings(db, event.id)
     by_id = await ticket_locks.lock_event_categories(db, event.id)
     existing = sorted(by_id.values(), key=lambda c: (c.sort_order, c.name))

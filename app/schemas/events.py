@@ -8,6 +8,8 @@ from pydantic_core import PydanticCustomError
 from app.services.syncsphere import IST
 
 EventStatus = Literal["draft", "published", "cancelled", "completed"]
+# none: no public registration.  free / paid: anyone may register, up to max_participants.
+RegistrationMode = Literal["none", "free", "paid"]
 MAX_DURATION = timedelta(hours=72)
 
 
@@ -55,6 +57,10 @@ class EventCreate(_Input):
     ends_at: datetime
     venue: str | None = Field(None, max_length=120)
     lead_id: uuid.UUID | None = None
+    venue_id: uuid.UUID | None = Field(None, description="A college venue; its name becomes `venue`")
+    registration_mode: RegistrationMode | None = None
+    max_participants: int | None = Field(None, ge=1, le=100000)
+    price_paise: int | None = Field(None, ge=0, le=10_000_000, description="Per participant, for a paid event")
 
     @model_validator(mode="after")
     def _window(self):
@@ -72,6 +78,10 @@ class EventUpdate(_Input):
     ends_at: datetime | None = None
     venue: str | None = Field(None, max_length=120)
     lead_id: uuid.UUID | None = None
+    venue_id: uuid.UUID | None = Field(None, description="A college venue; its name becomes `venue`")
+    registration_mode: RegistrationMode | None = None
+    max_participants: int | None = Field(None, ge=1, le=100000)
+    price_paise: int | None = Field(None, ge=0, le=10_000_000, description="Per participant, for a paid event")
 
     @model_validator(mode="after")
     def _window(self):
@@ -122,6 +132,10 @@ class EventOut(BaseModel):
     ends_at: datetime | None
     event_date: date | None
     venue: str | None
+    venue_id: uuid.UUID | None = None
+    registration_mode: str = "none"
+    max_participants: int | None = None
+    price_paise: int = 0
     status: str
     lead_id: uuid.UUID | None
     lead_name: str | None = None
