@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Verify Certificate · {{ cert.verification_code if cert else 'Public Verification' }}{% endblock %}
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+  
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+    <a href="/certificates" style="text-decoration: none; color: #64748b; font-size: 0.875rem;">← Back to Certificates</a>
+    <button onclick="window.print()" class="button secondary" style="font-size: 0.875rem;">🖨️ Print / Save PDF</button>
+  </div>
+
+  {% if cert %}
+  <!-- Official Branded Certificate Display -->
+  <div class="card" style="border: 8px double #0f172a; border-radius: 12px; padding: 3rem 2.5rem; text-align: center; background: radial-gradient(circle at center, #ffffff 0%, #f8fafc 100%); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1); margin-bottom: 2rem;">
+    <div style="margin-bottom: 1.5rem;">
+      <span style="font-size: 0.85rem; letter-spacing: 0.15em; text-transform: uppercase; font-weight: 700; color: #64748b;">
+        WhoDoo Verified Credential · {{ cert.club_name }}
+      </span>
+      <h1 style="font-size: 2.5rem; margin: 0.75rem 0 0.5rem 0; font-family: serif; color: #0f172a;">
+        {{ cert.title }}
+      </h1>
+      <p style="text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.85rem; color: #475569; margin: 0;">
+        Official Certificate of {{ cert.certificate_type }}
+      </p>
+    </div>
+
+    <div style="margin: 2.5rem 0; font-family: serif;">
+      <p style="font-size: 1.1rem; color: #475569; margin: 0 0 0.5rem 0;">This is proudly presented to</p>
+      <h2 style="font-size: 2.2rem; margin: 0; color: #1e293b; text-decoration: underline; text-decoration-color: #94a3b8; text-underline-offset: 8px;">
+        {{ cert.recipient_name }}
+      </h2>
+      <p style="font-size: 1.1rem; color: #475569; margin: 1.5rem auto 0 auto; max-width: 550px; line-height: 1.6;">
+        in recognition of active attendance and contribution to <strong>{{ cert.event_name }}</strong>, verified through campus event checkpoints.
+      </p>
+    </div>
+
+    <div style="display: flex; justify-content: space-around; align-items: flex-end; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid #e2e8f0;">
+      <div>
+        <p style="margin: 0; font-size: 0.8rem; color: #64748b;">ISSUED ON</p>
+        <p style="margin: 0.25rem 0 0 0; font-weight: 600; color: #1e293b;">{{ cert.issued_at.strftime('%B %d, %Y') }}</p>
+      </div>
+
+      <div>
+        <div style="display: inline-block; padding: 0.35rem 0.85rem; border-radius: 9999px; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; {% if cert.valid %}background: #dcfce7; color: #166534; border: 1px solid #86efac;{% else %}background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;{% endif %}">
+          {% if cert.valid %}✓ Verified Authentic{% else %}✗ Revoked{% endif %}
+        </div>
+      </div>
+
+      <div>
+        <p style="margin: 0; font-size: 0.8rem; color: #64748b;">VERIFICATION REF</p>
+        <p style="margin: 0.25rem 0 0 0; font-family: monospace; font-weight: 700; color: #0f172a;">{{ cert.verification_code }}</p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Verification Lookup Card -->
+  <div class="card">
+    <h2>Verify Another Certificate</h2>
+    <p class="sub" style="margin-bottom: 1rem;">Enter any WhoDoo certificate verification reference to confirm authenticity directly against server-owned event and check-in records.</p>
+    <form method="GET" action="/certificates/verify" style="display: flex; gap: 0.5rem;">
+      <input type="text" name="code" value="{{ query_code or '' }}" required placeholder="e.g. CERT-2026-A1B2C3D4" style="flex: 1; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-family: monospace; text-transform: uppercase;">
+      <button type="submit" class="button primary">Verify Credential</button>
+    </form>
+    {% if error %}
+    <p style="color: #dc2626; margin: 0.75rem 0 0 0; font-weight: 500;">{{ error }}</p>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}

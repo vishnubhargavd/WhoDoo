@@ -18,6 +18,7 @@ from app.core.dependencies import (
     get_optional_user,
     require_approver,
     require_finance_admin,
+    require_roles,
 )
 from app.models.ledger import ENTRY_TYPES, EXPENSE_CATEGORIES, PAYMENT_STATUSES, SOURCE_MODULES
 from app.schemas.ledger import LedgerFilters
@@ -50,7 +51,7 @@ FEATURES = (
     ("crewdoo-connect", "WhoDoo Connect", "Announcements", "Announcements and reminders that reach exactly the right people.", None),
     ("event-autopilot", "Event Autopilot", "Events", "Readiness monitoring that flags what an event still needs before doors open.", "/events"),
     ("syncsphere", "SyncSphere", "Calendar", "A conflict-aware schedule for every club event.", "/events"),
-    ("certidoo", "CertiDoo", "Certificates", "Issue verifiable digital certificates for participation and service.", None),
+    ("certidoo", "CertiDoo", "Certificates", "Issue verifiable digital certificates for participation and service.", "/certificates"),
     ("legacyvault", "LegacyVault", "Handover", "Pass knowledge to next year's leaders without starting from zero.", None),
 )
 
@@ -376,4 +377,143 @@ async def post_announcement_page(
     await announcement_service.create_announcement(db, user, create_data)
     await db.commit()
     return RedirectResponse(url="/announcements", status_code=303)
+
+
+@router.get("/certificates")
+async def certificates_page(
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import certidoo_service
+    can_issue = user.role in ("president", "treasurer", "event_lead")
+    my_certs = await certidoo_service.list_user_certificates(db, user.id)
+    club_events = []
+    club_members = []
+    all_certs = []
+    if can_issue:
+        club_events = await shared_directory.list_events(db, user.club_id)
+        club_members = await shared_directory.list_users(db, user.club_id)
+        all_certs = await certidoo_service.list_club_certificates(db, user.club_id)
+
+    return render(
+        request,
+        "certificates.html",
+        user,
+        my_certificates=my_certs,
+        can_issue=can_issue,
+        club_events=club_events,
+        club_members=club_members,
+        all_issued_certificates=all_certs,
+    )
+
+
+@router.post("/certificates/issue")
+async def issue_certificate_page(
+    request: Request,
+    user: CurrentUser = Depends(require_roles("president", "treasurer", "event_lead")),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.schemas.certidoo import CertificateIssueRequest
+    from app.services import certidoo_service
+    form = await request.form()
+    event_id_raw = form.get("event_id")
+    recipient_id_raw = form.get("recipient_user_id")
+    cert_type = str(form.get("certificate_type", "participation"))
+    title = str(form.get("title", "")).strip()
+
+    if not event_id_raw or not recipient_id_raw or not title:
+        return RedirectResponse(url="/certificates", status_code=303)
+
+    try:
+        req = CertificateIssueRequest(
+            event_id=uuid.UUID(str(event_id_raw)),
+            recipient_user_id=uuid.UUID(str(recipient_id_raw)),
+            certificate_type=cert_type,  # type: ignore
+            title=title,
+        )
+        await certidoo_service.issue_certificate(db, user.club_id, user.id, req)
+        return RedirectResponse(url="/certificates", status_code=303)
+    except AppError as exc:
+        my_certs = await certidoo_service.list_user_certificates(db, user.id)
+        club_events = await shared_directory.list_events(db, user.club_id)
+        club_members = await shared_directory.list_users(db, user.club_id)
+        all_certs = await certidoo_service.list_club_certificates(db, user.club_id)
+        return render(
+            request,
+            "certificates.html",
+            user,
+            my_certificates=my_certs,
+            can_issue=True,
+            club_events=club_events,
+            club_members=club_members,
+            all_issued_certificates=all_certs,
+            error=exc.message,
+        )
+
+
+@router.get("/certificates/verify")
+async def verify_certificate_lookup_page(
+    request: Request,
+    code: str | None = None,
+    user: CurrentUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import certidoo_service
+    if code:
+        code = code.strip().upper()
+        try:
+            cert_out = await certidoo_service.verify_certificate_by_code(db, code)
+            return render(
+                request,
+                "certificate_verify.html",
+                user,
+                cert=cert_out,
+                query_code=code,
+            )
+        except AppError as exc:
+            return render(
+                request,
+                "certificate_verify.html",
+                user,
+                cert=None,
+                query_code=code,
+                error=exc.message,
+            )
+    return render(
+        request,
+        "certificate_verify.html",
+        user,
+        cert=None,
+        query_code=None,
+    )
+
+
+@router.get("/certificates/verify/{code}")
+async def verify_certificate_direct_page(
+    request: Request,
+    code: str,
+    user: CurrentUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import certidoo_service
+    code = code.strip().upper()
+    try:
+        cert_out = await certidoo_service.verify_certificate_by_code(db, code)
+        return render(
+            request,
+            "certificate_verify.html",
+            user,
+            cert=cert_out,
+            query_code=code,
+        )
+    except AppError as exc:
+        return render(
+            request,
+            "certificate_verify.html",
+            user,
+            cert=None,
+            query_code=code,
+            error=exc.message,
+        )
 
