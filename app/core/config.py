@@ -1,5 +1,6 @@
 from decimal import Decimal
 from functools import lru_cache
+from urllib.parse import urlsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -39,6 +40,18 @@ class Settings(BaseSettings):
     # Where Stripe sends the buyer back to after paying.
     app_base_url: str = "http://127.0.0.1:8000"
 
+    # FairSeat ticket booking. Off by default: the routes answer 404 until it is switched on.
+    # With demo sign-in anyone can act as anyone, so it may only be on against a local database.
+    fairseat_enabled: bool = False
+    fairseat_hold_seconds: int = 600
+    fairseat_quote_seconds: int = 300
+    fairseat_max_per_booking: int = 6
+    fairseat_max_per_purchaser: int = 6
+
+    @property
+    def database_is_local(self) -> bool:
+        return urlsplit(self.database_url).hostname in (None, "localhost", "127.0.0.1", "::1")
+
     @property
     def token_secret(self) -> str:
         return self.supabase_jwt_secret or self.jwt_secret
@@ -54,6 +67,11 @@ class Settings(BaseSettings):
         if not self.demo_auth and self.token_secret == DEFAULT_JWT_SECRET:
             raise RuntimeError(
                 "JWT_SECRET (or SUPABASE_JWT_SECRET) must be set when DEMO_AUTH is off"
+            )
+        if self.fairseat_enabled and self.demo_auth and not self.database_is_local:
+            raise RuntimeError(
+                "FAIRSEAT_ENABLED cannot be combined with DEMO_AUTH on a database that is not local: "
+                "demo sign-in lets anyone book as anyone"
             )
 
 
