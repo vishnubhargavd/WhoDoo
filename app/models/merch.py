@@ -104,3 +104,14 @@ class PaymentEvent(Base):
     outcome: Mapped[str] = mapped_column(Text)
     detail: Mapped[str | None] = mapped_column(Text)
     received_at: Mapped[datetime] = created_at_col()
+
+
+class ClubInventoryManager(Base):
+    __tablename__ = "club_inventory_managers"
+
+    club_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    assigned_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
+    assigned_at: Mapped[datetime] = created_at_col()
+    updated_at: Mapped[datetime] = updated_at_col()
+

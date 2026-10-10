@@ -5,8 +5,10 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db, require_finance_admin
-from app.core.errors import AppError
+from app.core.errors import AppError, forbidden
 from app.schemas.merch import (
+    InventoryManagerAssign,
+    InventoryManagerOut,
     OrderCreate,
     OrderOut,
     OrderStatusUpdate,
@@ -19,6 +21,16 @@ from app.schemas.merch import (
 from app.services import merch_service, payment_service, storage_service
 
 router = APIRouter(prefix="/merch", tags=["MerchFlow"])
+
+
+async def require_merch_manager(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CurrentUser:
+    if not await merch_service.can_manage_merch(db, user):
+        raise forbidden("Only the designated inventory manager, president, or treasurer can manage merchandise")
+    return user
+
 
 
 @router.get("/images/{club_id}/{filename}")
@@ -46,9 +58,30 @@ async def get_product(
     return await merch_service.get_product(db, user, product_id)
 
 
+@router.get("/inventory-manager", response_model=InventoryManagerOut | None)
+async def get_inventory_manager(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> InventoryManagerOut | None:
+    return await merch_service.get_inventory_manager_details(db, user.club_id)
+
+
+@router.put("/inventory-manager", response_model=InventoryManagerOut)
+async def assign_inventory_manager(
+    body: InventoryManagerAssign,
+    user: CurrentUser = Depends(require_finance_admin),
+    db: AsyncSession = Depends(get_db),
+) -> InventoryManagerOut:
+    await merch_service.assign_inventory_manager(db, user.club_id, body.user_id, user)
+    await db.commit()
+    res = await merch_service.get_inventory_manager_details(db, user.club_id)
+    assert res is not None
+    return res
+
+
 @router.post("/products", response_model=ProductOut, status_code=201)
 async def create_product(
-    body: ProductCreate, user: CurrentUser = Depends(require_finance_admin), db: AsyncSession = Depends(get_db)
+    body: ProductCreate, user: CurrentUser = Depends(require_merch_manager), db: AsyncSession = Depends(get_db)
 ) -> ProductOut:
     product = await merch_service.create_product(db, user, body)
     await db.commit()
@@ -59,7 +92,7 @@ async def create_product(
 async def update_product(
     product_id: uuid.UUID,
     body: ProductUpdate,
-    user: CurrentUser = Depends(require_finance_admin),
+    user: CurrentUser = Depends(require_merch_manager),
     db: AsyncSession = Depends(get_db),
 ) -> ProductOut:
     product = await merch_service.update_product(db, user, product_id, body)
@@ -71,7 +104,7 @@ async def update_product(
 async def upload_product_image(
     product_id: uuid.UUID,
     file: UploadFile = File(..., description="Product image as PNG, JPEG or WebP, up to 5 MB"),
-    user: CurrentUser = Depends(require_finance_admin),
+    user: CurrentUser = Depends(require_merch_manager),
     db: AsyncSession = Depends(get_db),
 ) -> ProductOut:
     data = await file.read(5 * 1024 * 1024 + 1)
@@ -91,7 +124,7 @@ async def upload_product_image(
 async def add_variant(
     product_id: uuid.UUID,
     body: VariantCreate,
-    user: CurrentUser = Depends(require_finance_admin),
+    user: CurrentUser = Depends(require_merch_manager),
     db: AsyncSession = Depends(get_db),
 ) -> ProductOut:
     product = await merch_service.add_variant(db, user, product_id, body)
@@ -103,7 +136,7 @@ async def add_variant(
 async def update_variant(
     variant_id: uuid.UUID,
     body: VariantUpdate,
-    user: CurrentUser = Depends(require_finance_admin),
+    user: CurrentUser = Depends(require_merch_manager),
     db: AsyncSession = Depends(get_db),
 ) -> ProductOut:
     product = await merch_service.update_variant(db, user, variant_id, body)
@@ -141,7 +174,7 @@ async def get_order(
 async def update_order_status(
     order_id: uuid.UUID,
     body: OrderStatusUpdate,
-    user: CurrentUser = Depends(require_finance_admin),
+    user: CurrentUser = Depends(require_merch_manager),
     db: AsyncSession = Depends(get_db),
 ) -> OrderOut:
     """Mark an order packed or delivered, or cancel it. Cancelling a paid order restocks and refunds it."""

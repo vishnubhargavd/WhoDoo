@@ -150,3 +150,18 @@ class OrderOut(BaseModel):
 
 class OrderStatusUpdate(BaseModel):
     status: Literal["packed", "delivered", "cancelled"]
+
+
+class InventoryManagerOut(BaseModel):
+    club_id: uuid.UUID
+    user_id: uuid.UUID
+    assigned_by: uuid.UUID
+    assigned_at: datetime
+    updated_at: datetime
+    user_name: str | None = None
+    user_email: str | None = None
+
+
+class InventoryManagerAssign(BaseModel):
+    user_id: uuid.UUID
+

@@ -876,3 +876,79 @@ async def test_order_pages_show_titles_line_prices_and_total(client, world, auth
     admin = (await client.get("/admin/merch/orders")).text
     assert "Club Hoodie" in admin and "₹1,598.00" in admin and "₹2,497.00" in admin
 
+
+async def test_inventory_manager_assignment_and_permissions(client, world, auth, db):
+    from app.models.ledger import AuditLog
+
+    # 1. Non-leadership member cannot assign inventory manager
+    resp = await client.put(
+        f"{MERCH}/inventory-manager",
+        headers=auth(world.member),
+        json={"user_id": str(world.volunteer.id)},
+    )
+    assert resp.status_code == 403
+
+    # 2. Treasurer assigns volunteer as inventory manager
+    resp = await client.put(
+        f"{MERCH}/inventory-manager",
+        headers=auth(world.treasurer),
+        json={"user_id": str(world.volunteer.id)},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["user_id"] == str(world.volunteer.id)
+    assert data["assigned_by"] == str(world.treasurer.id)
+
+    # Verify GET /inventory-manager
+    get_resp = await client.get(f"{MERCH}/inventory-manager", headers=auth(world.member))
+    assert get_resp.status_code == 200
+    assert get_resp.json()["user_id"] == str(world.volunteer.id)
+
+    # 3. Designated manager (volunteer) can create products
+    prod_resp = await client.post(
+        f"{MERCH}/products",
+        headers=auth(world.volunteer),
+        json={
+            "name": "Manager Created Cap",
+            "description": "Club cap",
+            "base_price": "399",
+            "member_price": "299",
+            "variants": [
+                {"size": "Standard", "color": "Blue", "sku": "CAP-BLU", "stock_quantity": 5}
+            ],
+        },
+    )
+    assert prod_resp.status_code == 201
+    cap_id = prod_resp.json()["id"]
+
+    # 4. Regular member CANNOT modify product or variants (403)
+    edit_resp = await client.put(
+        f"{MERCH}/products/{cap_id}",
+        headers=auth(world.member),
+        json={"name": "Hacked Name"},
+    )
+    assert edit_resp.status_code == 403
+
+    # 5. Inventory manager CAN modify product and variants
+    edit_mgr_resp = await client.put(
+        f"{MERCH}/products/{cap_id}",
+        headers=auth(world.volunteer),
+        json={"name": "Updated Cap Name"},
+    )
+    assert edit_mgr_resp.status_code == 200
+    assert edit_mgr_resp.json()["name"] == "Updated Cap Name"
+
+    # 6. Reassignment to another user (president assigns member) records audit log
+    reassign_resp = await client.put(
+        f"{MERCH}/inventory-manager",
+        headers=auth(world.president),
+        json={"user_id": str(world.member.id)},
+    )
+    assert reassign_resp.status_code == 200
+    assert reassign_resp.json()["user_id"] == str(world.member.id)
+
+    logs = list(await db.scalars(select(AuditLog).where(AuditLog.action == "merch.inventory_manager_reassigned")))
+    assert len(logs) == 2
+
+
+

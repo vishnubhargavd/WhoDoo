@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -23,8 +23,9 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.core.dependencies import FINANCE_ADMINS, CurrentUser
 from app.core.errors import bad_request, conflict, forbidden, not_found
-from app.models.merch import MerchOrder, MerchProduct, OrderItem, ProductVariant
+from app.models.merch import ClubInventoryManager, MerchOrder, MerchProduct, OrderItem, ProductVariant
 from app.schemas.merch import (
+    InventoryManagerOut,
     OrderCreate,
     OrderItemOut,
     OrderOut,
@@ -47,6 +48,84 @@ class OutOfStock(Exception):
     def __init__(self, sku: str):
         super().__init__(sku)
         self.sku = sku
+
+
+# --- Inventory Manager -------------------------------------------------------------
+
+
+async def ensure_inventory_manager_table(session: AsyncSession) -> None:
+    await session.execute(text("""
+        CREATE TABLE IF NOT EXISTS public.club_inventory_managers (
+            club_id     uuid PRIMARY KEY,
+            user_id     uuid NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+            assigned_by uuid NOT NULL REFERENCES public.users(id) ON DELETE RESTRICT,
+            assigned_at timestamptz NOT NULL DEFAULT now(),
+            updated_at  timestamptz NOT NULL DEFAULT now()
+        );
+    """))
+
+
+async def get_inventory_manager(session: AsyncSession, club_id: uuid.UUID) -> ClubInventoryManager | None:
+    await ensure_inventory_manager_table(session)
+    return await session.get(ClubInventoryManager, club_id)
+
+
+async def can_manage_merch(session: AsyncSession, user: CurrentUser) -> bool:
+    if user.is_finance_admin:
+        return True
+    manager = await get_inventory_manager(session, user.club_id)
+    return manager is not None and manager.user_id == user.id
+
+
+async def assign_inventory_manager(
+    session: AsyncSession, club_id: uuid.UUID, user_id: uuid.UUID, actor: CurrentUser
+) -> ClubInventoryManager:
+    if not actor.is_finance_admin:
+        raise forbidden("Only club leadership (president or treasurer) can assign the inventory manager")
+    target_user = await shared_directory.get_user(session, user_id)
+    if target_user is None or target_user.club_id != club_id:
+        raise bad_request("invalid_user", "Inventory manager must belong to this club")
+
+    await ensure_inventory_manager_table(session)
+    existing = await session.get(ClubInventoryManager, club_id)
+    old_manager_id = existing.user_id if existing else None
+    if existing:
+        existing.user_id = user_id
+        existing.assigned_by = actor.id
+        existing.updated_at = datetime.now(timezone.utc)
+        manager = existing
+    else:
+        manager = ClubInventoryManager(club_id=club_id, user_id=user_id, assigned_by=actor.id)
+        session.add(manager)
+    await session.flush()
+    audit_service.record(
+        session,
+        club_id=club_id,
+        actor_id=actor.id,
+        action="merch.inventory_manager_reassigned",
+        entity_type="club_inventory_manager",
+        entity_id=user_id,
+        details={"from": str(old_manager_id) if old_manager_id else None, "to": str(user_id)},
+    )
+    return manager
+
+
+async def get_inventory_manager_details(
+    session: AsyncSession, club_id: uuid.UUID
+) -> InventoryManagerOut | None:
+    manager = await get_inventory_manager(session, club_id)
+    if manager is None:
+        return None
+    user = await shared_directory.get_user(session, manager.user_id)
+    return InventoryManagerOut(
+        club_id=manager.club_id,
+        user_id=manager.user_id,
+        assigned_by=manager.assigned_by,
+        assigned_at=manager.assigned_at,
+        updated_at=manager.updated_at,
+        user_name=(getattr(user, "full_name", None) or getattr(user, "name", None)) if user else None,
+        user_email=getattr(user, "email", None) if user else None,
+    )
 
 
 # --- Pricing -----------------------------------------------------------------------
@@ -112,8 +191,9 @@ async def _load_product(session: AsyncSession, club_id: uuid.UUID, product_id: u
 
 
 async def list_products(session: AsyncSession, user: CurrentUser, include_inactive: bool = False) -> list[ProductOut]:
-    if include_inactive and user.role not in FINANCE_ADMINS:
-        raise forbidden("Only the treasurer or president can see inactive products")
+    can_manage = await can_manage_merch(session, user)
+    if include_inactive and not can_manage:
+        raise forbidden("Only the inventory manager or club officers can see inactive products")
     stmt = select(MerchProduct).where(MerchProduct.club_id == user.club_id).options(WITH_VARIANTS)
     if not include_inactive:
         stmt = stmt.where(MerchProduct.is_active.is_(True))
@@ -123,10 +203,10 @@ async def list_products(session: AsyncSession, user: CurrentUser, include_inacti
 
 async def get_product(session: AsyncSession, user: CurrentUser, product_id: uuid.UUID) -> ProductOut:
     product = await _load_product(session, user.club_id, product_id)
-    is_admin = user.role in FINANCE_ADMINS
-    if not product.is_active and not is_admin:
+    can_manage = await can_manage_merch(session, user)
+    if not product.is_active and not can_manage:
         raise not_found("Product")
-    return present_product(product, user, include_inactive=is_admin)
+    return present_product(product, user, include_inactive=can_manage)
 
 
 def _new_variant(product_id: uuid.UUID, data: VariantCreate) -> ProductVariant:
@@ -353,8 +433,9 @@ async def create_order(session: AsyncSession, user: CurrentUser, data: OrderCrea
 
 
 async def list_orders(session: AsyncSession, user: CurrentUser, *, everyone: bool = False) -> list[OrderOut]:
-    if everyone and user.role not in FINANCE_ADMINS:
-        raise forbidden("Only the treasurer or president can see every order")
+    can_manage = await can_manage_merch(session, user)
+    if everyone and not can_manage:
+        raise forbidden("Only the inventory manager or club officers can see every order")
     stmt = select(MerchOrder).where(MerchOrder.club_id == user.club_id).options(WITH_ITEMS)
     if not everyone:
         stmt = stmt.where(MerchOrder.user_id == user.id)
@@ -364,7 +445,8 @@ async def list_orders(session: AsyncSession, user: CurrentUser, *, everyone: boo
 
 async def get_order(session: AsyncSession, user: CurrentUser, order_id: uuid.UUID) -> OrderOut:
     order = await load_order(session, user.club_id, order_id)
-    if order.user_id != user.id and user.role not in FINANCE_ADMINS:
+    can_manage = await can_manage_merch(session, user)
+    if order.user_id != user.id and not can_manage:
         raise not_found("Order")
     return (await present_orders(session, [order]))[0]
 
