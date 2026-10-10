@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.core.config import get_settings
 from app.core.dependencies import CurrentUser
-from app.services import payment_service
+from app.services import modules, payment_service
 
 APP_DIR = Path(__file__).resolve().parents[1]
 templates = Jinja2Templates(directory=APP_DIR / "templates")
@@ -59,47 +59,67 @@ templates.env.filters["label"] = label
 FINANCE_ROLES = ("treasurer", "president")
 APPROVER_ROLES = ("event_lead", "treasurer", "president")
 
+DOOR_STAFF = ("volunteer", "event_lead", "treasurer", "president")
+
+# (label, path, roles, module). A link with a module is offered only where that module's
+# tables exist (app/services/modules.py); until then its label is listed as not here yet.
 SECTIONS = (
     ("Events", (
-        ("Events", "/events", None),
-        ("My tasks", "/my-tasks", None),
+        ("Events", "/events", None, None),
+        ("My tasks", "/my-tasks", None, None),
+    )),
+    ("Tickets", (
+        ("Book tickets", "/tickets", None, "tickets"),
+        ("My tickets", "/tickets/mine", None, "tickets"),
+        ("Check-in", "/check-in", DOOR_STAFF, "checkin"),
+    )),
+    ("Club", (
+        ("Memberships", "/memberships", None, "memberships"),
+        ("Announcements", "/announcements", None, "announcements"),
+        ("Certificates", "/certificates", None, "certificates"),
+        ("Handover", "/handover", None, "handover"),
     )),
     ("Expenses", (
-        ("My expenses", "/expenses", None),
-        ("Submit expense", "/expenses/new", None),
-        ("Approvals", "/expenses/approvals", APPROVER_ROLES),
+        ("My expenses", "/expenses", None, None),
+        ("Submit expense", "/expenses/new", None, None),
+        ("Approvals", "/expenses/approvals", APPROVER_ROLES, None),
     )),
     ("Store", (
-        ("Store", "/store", None),
-        ("My orders", "/orders", None),
-        ("Merch admin", "/admin/merch", FINANCE_ROLES),
-        ("Merch orders", "/admin/merch/orders", FINANCE_ROLES),
+        ("Store", "/store", None, None),
+        ("My orders", "/orders", None, None),
+        ("Merch admin", "/admin/merch", FINANCE_ROLES, None),
+        ("Merch orders", "/admin/merch/orders", FINANCE_ROLES, None),
     )),
     ("Finance", (
-        ("Dashboard", "/treasurer", FINANCE_ROLES),
-        ("Ledger", "/treasurer/ledger", FINANCE_ROLES),
+        ("Dashboard", "/treasurer", FINANCE_ROLES, None),
+        ("Ledger", "/treasurer/ledger", FINANCE_ROLES, None),
     )),
 )
 # Pages that belong to a link without sharing its path.
 ALIASES = {"/checkout": "/orders"}
-# Modules owned by other team members that are not in this application yet.
-COMING_SOON = ("Memberships", "Tickets", "Check-in", "Announcements", "Certificates")
+
+
+def coming_soon() -> tuple[str, ...]:
+    """Modules whose tables are not in this database yet."""
+    found = modules.available()
+    return tuple(label for name, (label, _) in modules.MODULES.items() if name not in found)
 
 
 def navigation(user: CurrentUser | None, path: str) -> dict:
     """Sections and links this user may see, with the one matching `path` marked active."""
     if user is None:
-        return {"sections": [], "current": None, "coming_soon": COMING_SOON}
+        return {"sections": [], "current": None, "coming_soon": coming_soon()}
     for prefix, target in ALIASES.items():
         if path.startswith(prefix):
             path = target
 
+    found = modules.available()
     sections = []
     for title, links in SECTIONS:
         visible = [
             {"label": label, "href": href, "active": False}
-            for label, href, roles in links
-            if roles is None or user.role in roles
+            for label, href, roles, module in links
+            if (roles is None or user.role in roles) and (module is None or module in found)
         ]
         if visible:
             sections.append({"title": title, "href": visible[0]["href"], "links": visible, "active": False})
@@ -113,7 +133,7 @@ def navigation(user: CurrentUser | None, path: str) -> dict:
                 best = (section, link)
     if best:
         best[0]["active"] = best[1]["active"] = True
-    return {"sections": sections, "current": best[0] if best else None, "coming_soon": COMING_SOON}
+    return {"sections": sections, "current": best[0] if best else None, "coming_soon": coming_soon()}
 
 
 def render(request: Request, name: str, user: CurrentUser | None = None, status_code: int = 200, **context):

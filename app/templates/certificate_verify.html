@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Check a certificate · WhoDoo{% endblock %}
+{% block content %}
+<h1>Check a certificate</h1>
+<p class="sub">Enter the 16-character code printed on a WhoDoo certificate.</p>
+<div class="card">
+  <form method="get" action="/verify" class="actions">
+    <input type="text" name="code" value="{{ code }}" required maxlength="40" autocomplete="off" aria-label="Certificate code" style="flex: 1; min-width: 220px">
+    <button type="submit">Check</button>
+  </form>
+</div>
+{% if checked %}
+<div class="card">
+  {% if certificate and not certificate.revoked_at %}
+  <h2><span class="badge paid">Valid</span> {{ certificate.title }}</h2>
+  <p>Issued to <strong>{{ certificate.recipient_name }}</strong> by {{ certificate.club_name }} on {{ certificate.issued_at | nice_date }}.</p>
+  {% if certificate.event_name %}<p class="muted">Event: {{ certificate.event_name }}</p>{% endif %}
+  {% elif certificate %}
+  <h2><span class="badge failed">Revoked</span> {{ certificate.title }}</h2>
+  <p>This certificate was issued to {{ certificate.recipient_name }} by {{ certificate.club_name }} and later withdrawn. It is no longer valid.</p>
+  {% else %}
+  <h2><span class="badge failed">Not found</span></h2>
+  <p>No certificate has this code. Check it was typed correctly.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -556,3 +556,28 @@ button.brand-mark:hover { transform: scale(1.06); box-shadow: none; }
   button, .button { padding: 0 18px; }
   .hero-body { padding-top: 88px; }
 }
+
+/* --- Memberships, tickets, check-in, certificates ------------------------------------ */
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.plan-grid .card { margin: 0; }
+.ticket-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.ticket-pass { border: 2px solid var(--ink); border-radius: 16px; padding: 14px; background: #fff; text-align: center; }
+.ticket-pass svg { width: 100%; max-width: 220px; height: auto; }
+.ticket-pass.used { opacity: .55; }
+.scan-result { border: 2px solid var(--ink); border-radius: 16px; padding: 16px; margin: 12px 0; display: grid; gap: 4px; }
+.scan-result strong { font-size: 1.4rem; }
+.scan-result.ok { background: var(--green-bg); }
+.scan-result.warn { background: var(--amber-bg); }
+.scan-result.bad { background: var(--coral); }
+#scan-video { width: 100%; max-width: 420px; border-radius: 16px; border: 2px solid var(--ink); }
+.announcement.unread { border-left: 8px solid var(--cobalt); }
+.announcement p.body, .note-body { white-space: pre-wrap; }
+.certificate { border: 3px double var(--ink); border-radius: 12px; padding: 40px 28px; text-align: center; background: #fff; }
+.certificate h1 { font-size: 2rem; margin: 6px 0 18px; }
+.certificate .name { font-size: 2.2rem; font-weight: 800; margin: 12px 0; }
+.certificate svg { width: 120px; height: auto; }
+.certificate.revoked { opacity: .6; }
+@media print {
+  .topbar, .subnav, .footer, .no-print, #flash { display: none !important; }
+  .certificate { border-width: 6px; page-break-inside: avoid; }
+}

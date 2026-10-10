@@ -23,10 +23,14 @@ from app.models.ledger import ENTRY_TYPES, EXPENSE_CATEGORIES, PAYMENT_STATUSES,
 from app.schemas.ledger import LedgerFilters
 from app.core.errors import AppError
 from app.services import (
+    announcement_service,
     event_service,
     expense_service,
+    gatesync_service,
     ledger_service,
+    membership_service,
     merch_service,
+    modules,
     payment_service,
     shared_directory,
     task_service,
@@ -36,8 +40,8 @@ from app.web.templating import inr, render
 router = APIRouter(include_in_schema=False)
 
 
-# The twelve WhoDoo tools from the product design. `href` is set only for the ones
-# that exist in this application; the rest are shown honestly as not here yet.
+# The twelve WhoDoo tools from the product design. `href` here is for the tools that are
+# always on; the six in MODULE_FEATURES get theirs when their tables exist.
 FEATURES = (
     ("membercore", "MemberCore", "Memberships", "Profiles, dues, roles, renewals and member discounts in one source of truth.", None),
     ("fairseat", "FairSeat", "Tickets", "Live ticket availability with member pricing and fair, automatic waitlists.", None),
@@ -54,12 +58,29 @@ FEATURES = (
 )
 
 
+# Tools that appear once their module's tables exist (app/services/modules.py): tool -> (module, page).
+MODULE_FEATURES = {
+    "membercore": ("memberships", "/memberships"),
+    "fairseat": ("tickets", "/tickets"),
+    "gatesync": ("checkin", "/check-in"),
+    "crewdoo-connect": ("announcements", "/announcements"),
+    "certidoo": ("certificates", "/certificates"),
+    "legacyvault": ("handover", "/handover"),
+}
+
+
 def _features(user: CurrentUser | None) -> list[dict]:
     features = [dict(zip(("id", "name", "category", "description", "href"), row)) for row in FEATURES]
     for feature in features:
         # TrustLedger's pages are for the treasurer and president; others get their own expenses.
         if feature["id"] == "trustledger" and user is not None and not user.is_finance_admin:
             feature["href"] = "/expenses"
+        module, href = MODULE_FEATURES.get(feature["id"], (None, None))
+        if module and modules.has(module):
+            # The door is for door staff; everyone else's side of GateSync is their own tickets.
+            if module == "checkin" and user is not None and user.role == "member":
+                href = "/tickets/mine"
+            feature["href"] = href
     return features
 
 
@@ -100,6 +121,31 @@ async def _home_tiles(db: AsyncSession, user: CurrentUser) -> list[dict]:
         tiles.append({"module": "Finance", "tag": "TrustLedger", "href": "/treasurer",
                       "figure": inr(summary.current_balance).split(".")[0], "title": "club balance",
                       "detail": f"{inr(summary.pending_reimbursements)} owed in approved reimbursements."})
+
+    if modules.has("memberships"):
+        mine = await membership_service.my_membership(db, user)
+        figure = {"active": "Active", "pending": "Pending", "none": "Join"}.get(mine.status, "Renew")
+        detail = "Plans, dues and the member discount on tickets."
+        if mine.status == "active":
+            detail = f"{mine.plan.name}, valid until {mine.expires_at.astimezone().strftime('%d %b %Y')}."
+        elif mine.awaiting == "payment":
+            detail = f"{inr(mine.amount_due_paise / 100)} of dues waiting to be paid."
+        tiles.append({"module": "Membership", "tag": "MemberCore", "href": "/memberships", "figure": figure,
+                      "title": "your membership", "detail": detail})
+
+    if modules.has("tickets"):
+        seats = sum(len(item["tickets"]) for item in await gatesync_service.my_tickets(db, user)
+                    if item["event"].status == "published")
+        await db.commit()
+        tiles.append({"module": "Tickets", "tag": "FairSeat", "href": "/tickets/mine" if seats else "/tickets",
+                      "figure": seats, "title": "ticket" + ("" if seats == 1 else "s") + " of yours",
+                      "detail": "Book seats and show your QR code at the door."})
+
+    if modules.has("announcements"):
+        unread = await announcement_service.unread_count(db, user)
+        tiles.append({"module": "Announcements", "tag": "CrewDoo Connect", "href": "/announcements", "figure": unread,
+                      "title": "unread announcement" + ("" if unread == 1 else "s"),
+                      "detail": "What the club has told you, in one place."})
 
     products = await merch_service.list_products(db, user)
     orders = await merch_service.list_orders(db, user)

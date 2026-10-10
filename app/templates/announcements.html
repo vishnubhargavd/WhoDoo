@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Announcements · WhoDoo{% endblock %}
+{% block content %}
+<h1>Announcements</h1>
+<p class="sub">CrewDoo Connect · what you need to know, sent to the people it is for.</p>
+{% set audiences = {"everyone": "Everyone", "members": "Members", "volunteers": "Volunteers", "officers": "Officers", "event": "Event"} %}
+
+{% if can_post %}
+<div class="card">
+  <h2>Post an announcement</h2>
+  <form data-api="POST" action="/api/v1/announcements" class="stack">
+    <label>Title <input type="text" name="title" required maxlength="160"></label>
+    <label>Message <textarea name="body" rows="4" required maxlength="5000"></textarea></label>
+    <div class="fields">
+      <label>Who is it for
+        <select name="audience">
+          <option value="everyone">Everyone in the club</option>
+          <option value="members">Members only</option>
+          <option value="volunteers">Volunteers and officers</option>
+          <option value="officers">Officers only</option>
+          <option value="event">People on one event (pick it)</option>
+        </select>
+      </label>
+      <label>Event (for an event announcement)
+        <select name="event_id"><option value="">—</option>
+          {% for e in events %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
+        </select>
+      </label>
+      <label><input type="checkbox" name="pinned"> Pin to the top</label>
+    </div>
+    <button type="submit">Post</button>
+  </form>
+</div>
+{% endif %}
+
+{% if items | rejectattr("read") | list %}
+<div class="actions"><button class="small secondary" data-post="/api/v1/announcements/read">Mark all as read</button></div>
+{% endif %}
+
+{% for a in items %}
+<div class="card announcement {{ 'unread' if not a.read }}">
+  <h2>{{ a.title }}
+    {% if a.pinned %}<span class="badge final">Pinned</span>{% endif %}
+    {% if not a.read %}<span class="badge pending">New</span>{% endif %}</h2>
+  <p class="muted">{{ a.author_name }} · {{ a.created_at | nice_date }} · for {{ a.event_name if a.audience == "event" else audiences[a.audience] }}
+    {% if a.read_count is not none %} · read by {{ a.read_count }}{% endif %}</p>
+  <p class="body">{{ a.body }}</p>
+  <div class="actions">
+    {% if not a.read %}<button class="small secondary" data-post="/api/v1/announcements/{{ a.id }}/read">Mark as read</button>{% endif %}
+    {% if a.can_remove %}<button class="small danger" data-post="/api/v1/announcements/{{ a.id }}/remove" data-confirm="Take this announcement down for everyone?">Remove</button>{% endif %}
+  </div>
+</div>
+{% else %}
+<div class="card"><p class="empty">Nothing has been announced yet.</p></div>
+{% endfor %}
+{% endblock %}

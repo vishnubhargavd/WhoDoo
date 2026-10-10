@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Handover · WhoDoo{% endblock %}
+{% block content %}
+<h1>Handover</h1>
+<p class="sub">LegacyVault · what the next person in a role needs to know. Every saved version is kept.</p>
+{% set role_names = {"president": "President", "treasurer": "Treasurer", "event_lead": "Event leads", "volunteer": "Volunteers", "everyone": "Everyone"} %}
+
+{% if writable %}
+<div class="card">
+  <h2>Write a note</h2>
+  <form data-api="POST" action="/api/v1/handover" class="stack">
+    <div class="fields">
+      <label>For <select name="role">{% for r in writable %}<option value="{{ r }}">{{ role_names[r] }}</option>{% endfor %}</select></label>
+      <label>Title <input type="text" name="title" required maxlength="160" placeholder="How the annual budget gets approved"></label>
+    </div>
+    <label>Note <textarea name="body" rows="6" required maxlength="20000"></textarea></label>
+    <button type="submit">Save note</button>
+  </form>
+</div>
+{% endif %}
+
+{% if can_see_archived %}
+<p><a href="/handover{{ '' if show_archived else '?archived=true' }}">{{ "Hide archived notes" if show_archived else "Show archived notes" }}</a></p>
+{% endif %}
+
+{% for group in notes | groupby("role") %}
+<h2>{{ role_names[group.grouper] }}</h2>
+{% for n in group.list %}
+<div class="card">
+  <h3>{{ n.title }} {% if n.archived %}<span class="badge cancelled">Archived</span>{% endif %}</h3>
+  <p class="muted">Version {{ n.version }} · {{ n.updated_by_name }} · {{ n.updated_at | nice_date }}</p>
+  <p class="note-body">{{ n.body }}</p>
+  {% if n.can_edit %}
+  <details><summary>Edit</summary>
+    <form data-api="PUT" action="/api/v1/handover/{{ n.id }}" class="stack">
+      <label>Title <input type="text" name="title" value="{{ n.title }}" required maxlength="160"></label>
+      <label>Note <textarea name="body" rows="8" required maxlength="20000">{{ n.body }}</textarea></label>
+      <div class="actions"><button type="submit" class="small">Save new version</button>
+        <button type="button" class="small secondary" data-post="/api/v1/handover/{{ n.id }}/{{ 'restore' if n.archived else 'archive' }}">{{ "Restore" if n.archived else "Archive" }}</button></div>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="card"><p class="empty">No handover notes yet.</p></div>
+{% endfor %}
+{% endblock %}

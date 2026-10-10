@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Memberships · WhoDoo{% endblock %}
+{% block content %}
+<h1>Memberships</h1>
+<p class="sub">MemberCore · your standing with the club, and what it gets you.</p>
+
+<div class="card">
+  <h2>Your membership <span class="badge {{ {'active': 'paid', 'pending': 'pending', 'expired': 'cancelled', 'cancelled': 'cancelled'}.get(mine.status, 'draft') }}">{{ "Not a member" if mine.status == "none" else mine.status | label }}</span></h2>
+  {% if mine.status == "active" %}
+  <p>{{ mine.plan.name }} · valid until <strong>{{ mine.expires_at | nice_date }}</strong>
+    {% if mine.discount_bps %} · {{ "%g" | format(mine.discount_bps / 100) }}% off tickets{% endif %}</p>
+  {% elif mine.status == "expired" %}
+  <p>Your {{ mine.plan.name }} membership ran out on {{ mine.expires_at | nice_date }}. Pick a plan below to rejoin.</p>
+  {% elif mine.status == "cancelled" %}
+  <p>Your membership was cancelled. Pick a plan below to rejoin.</p>
+  {% elif mine.status == "none" %}
+  <p>You have not joined yet. Pick a plan below.</p>
+  {% endif %}
+  {% if mine.awaiting == "payment" %}
+  <div class="notice info">{{ mine.awaiting_plan.name }}: <strong>{{ mine.amount_due_paise | paise }}</strong> to pay.
+    Once paid it runs until {{ mine.new_expires_at | nice_date }}.</div>
+  <div class="actions"><button data-pay-membership>Pay {{ mine.amount_due_paise | paise }}</button></div>
+  <p class="muted">Paying in person instead? The treasurer can record it for you.</p>
+  {% elif mine.awaiting == "approval" %}
+  <div class="notice info">{{ mine.awaiting_plan.name }} is free. The treasurer or president approves it; nothing to pay.</div>
+  {% endif %}
+</div>
+
+<h2>Plans</h2>
+{% if plans %}
+<div class="plan-grid">
+  {% for plan in plans %}
+  <div class="card">
+    <h3>{{ plan.name }} {% if not plan.is_active %}<span class="badge cancelled">Hidden</span>{% endif %}</h3>
+    <p class="price">{{ plan.price_paise | paise if plan.price_paise else "Free" }}</p>
+    <p class="muted">{{ plan.validity_days }} days{% if plan.ticket_discount_bps %} · {{ "%g" | format(plan.ticket_discount_bps / 100) }}% off tickets{% endif %}</p>
+    {% if plan.description %}<p>{{ plan.description }}</p>{% endif %}
+    {% if plan.is_active %}
+    <button class="small" data-post="/api/v1/memberships/enroll" data-body='{"plan_id": "{{ plan.id }}"}'
+            data-confirm="{{ 'Renew: adds ' ~ plan.validity_days ~ ' days to your current membership once paid.' if mine.status == 'active' else 'Join on this plan. It becomes active once the dues are paid or approved.' }}">
+      {{ "Renew on this plan" if mine.status == "active" else "Join on this plan" }}</button>
+    {% endif %}
+    {% if officer %}
+    <details style="margin-top: 10px"><summary>Edit plan</summary>
+      <form data-api="PUT" action="/api/v1/memberships/plans/{{ plan.id }}" class="stack">
+        <label>Name <input type="text" name="name" value="{{ plan.name }}" required maxlength="120"></label>
+        <label>Price (paise) <input type="number" name="price_paise" value="{{ plan.price_paise }}" min="0" required></label>
+        <label>Valid for (days) <input type="number" name="validity_days" value="{{ plan.validity_days }}" min="1" max="3650" required></label>
+        <label>Ticket discount (basis points, 1000 = 10%) <input type="number" name="ticket_discount_bps" value="{{ plan.ticket_discount_bps }}" min="0" max="10000" required></label>
+        <label><input type="checkbox" name="is_active" {{ "checked" if plan.is_active }}> Offered to members</label>
+        <button type="submit" class="small secondary">Save plan</button>
+      </form>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card"><p class="empty">No membership plans yet.{% if officer %} Add the first one below.{% endif %}</p></div>
+{% endif %}
+
+{% if officer %}
+<div class="card">
+  <h2>Add a plan</h2>
+  <p class="muted">Changing a plan later affects new joins and renewals only. A free plan needs your approval for each member.</p>
+  <form data-api="POST" action="/api/v1/memberships/plans" class="stack">
+    <div class="fields">
+      <label>Name <input type="text" name="name" required maxlength="120" placeholder="Annual member"></label>
+      <label>Price (paise) <input type="number" name="price_paise" min="0" required placeholder="50000 = ₹500"></label>
+      <label>Valid for (days) <input type="number" name="validity_days" min="1" max="3650" value="365" required></label>
+      <label>Ticket discount (bps) <input type="number" name="ticket_discount_bps" min="0" max="10000" value="0" required></label>
+    </div>
+    <label>Description <input type="text" name="description" maxlength="2000"></label>
+    <button type="submit">Add plan</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Members</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Person</th><th>Standing</th><th>Plan</th><th>Until</th><th>Waiting for</th><th></th></tr></thead>
+      <tbody>
+        {% for m in members %}
+        <tr>
+          <td>{{ m.full_name }}<br><span class="muted">{{ m.email }}</span></td>
+          <td><span class="badge {{ {'active': 'paid', 'pending': 'pending'}.get(m.status, 'cancelled') }}">{{ "Not joined" if m.status == "none" else m.status | label }}</span></td>
+          <td>{{ m.plan.name if m.plan else "—" }}</td>
+          <td class="nowrap">{{ m.expires_at | nice_date if m.status in ("active", "expired") else "—" }}</td>
+          <td>{% if m.awaiting == "payment" %}{{ m.amount_due_paise | paise }} for {{ m.awaiting_plan.name }}{% elif m.awaiting == "approval" %}Approval of {{ m.awaiting_plan.name }}{% else %}—{% endif %}</td>
+          <td class="actions">
+            {% if m.awaiting == "payment" %}
+            <button class="small secondary" data-post="/api/v1/memberships/members/{{ m.user_id }}/offline-payment"
+                    data-prompt="Receipt number, or how the money was received" data-field="reference" data-required>Record payment</button>
+            {% endif %}
+            {% if m.awaiting %}
+            <button class="small secondary" data-post="/api/v1/memberships/members/{{ m.user_id }}/waive"
+                    data-prompt="Why are the dues waived? This is kept on record." data-field="reason" data-required>{{ "Approve" if m.awaiting == "approval" else "Waive dues" }}</button>
+            {% endif %}
+            {% if m.status in ("active", "pending") %}
+            <button class="small danger" data-post="/api/v1/memberships/members/{{ m.user_id }}/cancel"
+                    data-prompt="Why is this membership cancelled?" data-field="reason" data-required>Cancel</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="/static/modules.js"></script>{% endblock %}

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Certificates · WhoDoo{% endblock %}
+{% block content %}
+<h1>Certificates</h1>
+<p class="sub">CertiDoo · each certificate carries a code anyone can check at <a href="/verify">/verify</a>.</p>
+
+<div class="card">
+  <h2>Yours</h2>
+  {% if mine %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Certificate</th><th>Issued</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for c in mine %}
+      <tr><td>{{ c.title }}<br><span class="muted">{{ c.kind | label }}</span></td><td class="nowrap">{{ c.issued_at | nice_date }}</td>
+        <td><span class="badge {{ 'cancelled' if c.revoked_at else 'paid' }}">{{ "Revoked" if c.revoked_at else "Valid" }}</span></td>
+        <td><a class="button small secondary" href="/certificates/{{ c.id }}">Open</a></td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="empty">You have no certificates yet.</p>
+  {% endif %}
+</div>
+
+{% if issuer %}
+<div class="card">
+  <h2>Issue for an event</h2>
+  <p class="muted">Participation goes to everyone checked in at the door{% if not attendance %} (check-in is not switched on here){% endif %}; volunteering to everyone who finished a task. People who already have one are skipped.</p>
+  {% for e in events %}
+  <div class="actions" style="justify-content: space-between; margin: 6px 0">
+    <span>{{ e.name }}</span>
+    <span class="actions">
+      <button class="small secondary" data-post="/api/v1/certificates/for-event" data-body='{"event_id": "{{ e.id }}", "kind": "participation"}' data-confirm="Issue participation certificates to everyone checked in?">Participation</button>
+      <button class="small secondary" data-post="/api/v1/certificates/for-event" data-body='{"event_id": "{{ e.id }}", "kind": "volunteering"}' data-confirm="Issue volunteering certificates to everyone who finished a task?">Volunteering</button>
+    </span>
+  </div>
+  {% else %}
+  <p class="empty">No events you can issue for.</p>
+  {% endfor %}
+</div>
+
+{% if people %}
+<div class="card">
+  <h2>Issue to one person</h2>
+  <form data-api="POST" action="/api/v1/certificates" class="stack">
+    <div class="fields">
+      <label>Person <select name="recipient_user_id" required>{% for p in people %}<option value="{{ p.id }}">{{ p.full_name }}</option>{% endfor %}</select></label>
+      <label>Kind <select name="kind"><option value="achievement">Achievement</option><option value="participation">Participation</option><option value="volunteering">Volunteering</option></select></label>
+      <label>Event (optional) <select name="event_id"><option value="">—</option>{% for e in events %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}</select></label>
+    </div>
+    <label>Title <input type="text" name="title" required maxlength="200" placeholder="Best Volunteer 2026"></label>
+    <label>Note (optional) <input type="text" name="note" maxlength="500"></label>
+    <button type="submit">Issue certificate</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Issued in the club</h2>
+  {% if issued %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Recipient</th><th>Certificate</th><th>Issued</th><th>Code</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for c in issued %}
+      <tr><td>{{ c.recipient_name }}</td><td>{{ c.title }}</td><td class="nowrap">{{ c.issued_at | nice_date }}</td>
+        <td class="nowrap"><a href="/verify/{{ c.verify_code }}">{{ c.verify_code }}</a></td>
+        <td><span class="badge {{ 'cancelled' if c.revoked_at else 'paid' }}">{{ "Revoked" if c.revoked_at else "Valid" }}</span></td>
+        <td class="actions"><a class="button small secondary" href="/certificates/{{ c.id }}">Open</a>
+          {% if not c.revoked_at %}<button class="small danger" data-post="/api/v1/certificates/{{ c.id }}/revoke" data-prompt="Why is this certificate revoked? Shown on record." data-field="reason" data-required>Revoke</button>{% endif %}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="empty">Nothing issued yet.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

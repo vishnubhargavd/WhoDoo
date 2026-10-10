@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,7 +13,8 @@ from app.core.config import get_settings
 from app.core.dependencies import get_current_user
 from app.core.errors import AppError
 from app.db.database import SessionLocal
-from app.web import dev_auth, event_pages, pages
+from app.services import fairseat_pricing, membership_service, modules
+from app.web import dev_auth, event_pages, module_pages, pages
 from app.web.templating import APP_DIR, render
 
 logger = logging.getLogger("whodoo")
@@ -25,7 +26,11 @@ app = FastAPI(
     description="WhoDoo is a club management platform for college students. This service is its finance module: "
     "TrustLedger, Snap-to-Reimburse and MerchFlow.",
     version="0.1.0",
+    # Finds out once which optional modules have their tables; every page's menu reads the answer.
+    dependencies=[Depends(modules.load)],
 )
+# Ticket prices take member discounts from MemberCore's records (none until its tables exist).
+fairseat_pricing.set_membership_source(membership_service.MemberCoreMemberships())
 
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
@@ -34,6 +39,7 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 app.include_router(api_router)
 app.include_router(pages.router)
 app.include_router(event_pages.router)
+app.include_router(module_pages.router)
 if settings.demo_auth:
     app.include_router(dev_auth.router)
 

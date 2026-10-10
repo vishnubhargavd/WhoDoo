@@ -1,4 +1,4 @@
-{# The glass menu: every destination this user has, plus modules that are not built into this app yet. #}
+{# The glass menu: every destination this user has, plus any module whose tables this database lacks. #}
 <div class="menu-wrap" data-menu>
   <button type="button" class="menu-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
     <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
@@ -26,12 +26,14 @@
       </ul>
       {% set counter.i = 6 %}
     {% endif %}
-    <h3>Coming from the rest of the team</h3>
+    {% if nav.coming_soon %}
+    <h3>Not switched on here yet</h3>
     <ul>
       {% for label in nav.coming_soon %}
       <li style="--i: {{ counter.i + loop.index0 }}"><span class="soon" aria-disabled="true">{{ label }} <small>· soon</small></span></li>
       {% endfor %}
     </ul>
+    {% endif %}
     <h3>Account</h3>
     <ul>
       {% if user %}

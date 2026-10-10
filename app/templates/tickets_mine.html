@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}My tickets · WhoDoo{% endblock %}
+{% block content %}
+<h1>My tickets</h1>
+<p class="sub">Show a code at the door. Each code admits one person, once. Treat it like cash: anyone holding it can use it.</p>
+
+{% for item in bookings %}
+<div class="card">
+  <h2>{{ item.event.name }}
+    {% if item.event.status != "published" %}<span class="badge cancelled">Event {{ item.event.status | label }}</span>{% endif %}</h2>
+  <p class="muted">{{ item.event.starts_at | ist }} IST{% if item.event.venue %} · {{ item.event.venue }}{% endif %}
+    · {{ item.category.name }} · {{ item.booking.total_price_paise | paise if item.booking.total_price_paise else "Free" }}</p>
+  <div class="ticket-grid">
+    {% for t in item.tickets %}
+    <div class="ticket-pass {{ 'used' if t.status != 'issued' or not t.qr_svg }}">
+      <strong>Ticket {{ t.seat_number }} of {{ item.tickets | length }}</strong>
+      {% if t.qr_svg %}
+      <div aria-label="QR code for ticket {{ t.seat_number }}">{{ t.qr_svg | safe }}</div>
+      <span class="badge paid">Valid</span>
+      {% elif t.status == "checked_in" %}
+      <p><span class="badge final">Checked in</span></p><p class="muted">{{ t.checked_in_at | ist('%d %b, %H:%M') }} IST</p>
+      {% elif t.status == "revoked" %}
+      <p><span class="badge cancelled">Cancelled</span></p>
+      {% else %}
+      <p class="muted">Not valid for entry.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="card"><p class="empty">No tickets yet. <a href="/tickets">See what is on sale</a>.</p></div>
+{% endfor %}
+{% endblock %}

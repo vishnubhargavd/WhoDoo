@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Tickets · WhoDoo{% endblock %}
+{% block content %}
+<h1>Tickets</h1>
+<p class="sub">FairSeat · live availability. Prices are worked out by the server{% if membership and membership.status == "active" and membership.discount_bps %}; your membership takes {{ "%g" | format(membership.discount_bps / 100) }}% off eligible tickets{% endif %}.</p>
+<span data-ticket-payments="{{ 'on' if payments_on else 'off' }}" hidden></span>
+
+{% if holds %}
+<div class="card">
+  <h2>Waiting for payment</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Event</th><th class="num">Tickets</th><th class="num">Total</th><th>Held until</th><th></th></tr></thead>
+    <tbody>
+      {% for b in holds %}
+      <tr>
+        <td>{{ event_names.get(b.event_id, "Event") }}</td><td class="num">{{ b.quantity }}</td>
+        <td class="num">{{ b.total_price_paise | paise }}</td><td class="nowrap">{{ b.hold_expires_at | ist('%H:%M') }} IST</td>
+        <td class="actions">
+          {% if payments_on %}<button class="small" data-pay-booking="{{ b.booking_id }}">Pay now</button>{% endif %}
+          <button class="small secondary" data-post="/api/v1/ticket-bookings/{{ b.booking_id }}/cancel" data-confirm="Release these seats?">Release</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% if not payments_on %}<p class="muted">Online payment for tickets is not switched on here, so held seats cannot be paid for yet.</p>{% endif %}
+</div>
+{% endif %}
+
+{% for event in events %}
+<div class="card">
+  <h2>{{ event.name }} <span class="badge {{ {'open': 'paid', 'not_open': 'pending', 'closed': 'cancelled'}[event.sale_state] }}">{{ {"open": "On sale", "not_open": "Not open yet", "closed": "Sales closed"}[event.sale_state] }}</span></h2>
+  <p class="muted">{{ event.starts_at | ist }} IST{% if event.venue %} · {{ event.venue }}{% endif %}
+    · booking {{ event.booking_opens_at | ist('%d %b, %H:%M') }} – {{ event.booking_closes_at | ist('%d %b, %H:%M') }}</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Ticket</th><th class="num">Price</th><th class="num">Left</th><th></th></tr></thead>
+    <tbody>
+      {% for c in event.categories %}
+      <tr>
+        <td>{{ c.name }}{% if c.description %}<br><span class="muted">{{ c.description }}</span>{% endif %}</td>
+        <td class="num">{{ c.price_paise | paise if c.price_paise else "Free" }}{% if c.member_discount_eligible and c.price_paise %}<br><span class="muted">member discount applies</span>{% endif %}</td>
+        <td class="num">{{ c.seats_remaining if c.seats_remaining is not none else "—" }}</td>
+        <td>
+          {% if c.sale_state == "open" and (c.seats_remaining is none or c.seats_remaining > 0) %}
+          <form data-book data-event="{{ event.id }}" data-category="{{ c.id }}" data-name="{{ c.name }}" class="actions">
+            <select name="quantity" aria-label="How many {{ c.name }} tickets">
+              {% for n in range(1, [c.max_per_booking, c.seats_remaining if c.seats_remaining is not none else c.max_per_booking] | min + 1) %}<option>{{ n }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="small">Book</button>
+          </form>
+          {% elif c.sale_state == "open" %}<span class="badge cancelled">Sold out</span>
+          {% else %}<span class="muted">{{ "Opens later" if c.sale_state == "not_open" else "Closed" }}</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% else %}
+<div class="card"><p class="empty">No events are selling tickets right now. An event lead sets tickets up from the event's page.</p></div>
+{% endfor %}
+<p><a class="button secondary" href="/tickets/mine">My tickets</a></p>
+{% endblock %}
+{% block scripts %}<script src="/static/modules.js"></script>{% endblock %}

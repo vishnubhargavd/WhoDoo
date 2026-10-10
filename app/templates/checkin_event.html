@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Check-in · {{ door.event.name }} · WhoDoo{% endblock %}
+{% block content %}
+<h1>{{ door.event.name }}</h1>
+<p class="sub" data-door="{{ door.event.id }}"><strong id="door-count">{{ door.checked_in }}</strong> of {{ door.total }} checked in · <a href="/check-in">Other events</a></p>
+
+<div class="card">
+  <h2>Scan a ticket</h2>
+  <p id="scan-note" class="muted">Point the camera at the QR code on the ticket.</p>
+  <div class="actions"><button id="scan-start">Start camera</button></div>
+  <video id="scan-video" playsinline muted hidden></video>
+  <div id="scan-result" class="scan-result" role="status" aria-live="assertive" hidden><strong></strong><span></span></div>
+  <form id="scan-manual" class="actions" style="margin-top: 12px">
+    <input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="whodoo.ticket.v1.…" aria-label="Ticket code" style="flex: 1; min-width: 220px">
+    <button type="submit" class="secondary">Check code</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Guest list</h2>
+  {% if door.guests %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Holder</th><th>Ticket</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for g in door.guests %}
+      <tr data-ticket="{{ g.ticket_id }}">
+        <td>{{ g.holder_name }}</td><td>{{ g.category }} · #{{ g.seat_number }}</td>
+        <td><span class="badge {{ 'paid' if g.status == 'checked_in' else 'pending' }}">{{ "Checked in" if g.status == "checked_in" else "Not arrived" }}</span>
+          {% if g.checked_in_at %}<span class="muted">{{ g.checked_in_at | ist('%H:%M') }}</span>{% endif %}</td>
+        <td>{% if g.status != "checked_in" %}<button class="small secondary" data-admit="{{ g.ticket_id }}">Check in</button>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="empty">Nobody holds a ticket for this event yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/modules.js"></script>{% endblock %}

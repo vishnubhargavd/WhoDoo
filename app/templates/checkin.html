@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Check-in · WhoDoo{% endblock %}
+{% block content %}
+<h1>Check-in</h1>
+<p class="sub">GateSync · pick the event you are on the door for.</p>
+<div class="card">
+  {% if events %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Event</th><th>Starts</th><th class="num">Checked in</th><th></th></tr></thead>
+    <tbody>
+      {% for row in events %}
+      <tr>
+        <td>{{ row.event.name }}</td><td class="nowrap">{{ row.event.starts_at | ist }} IST</td>
+        <td class="num">{{ row.checked_in }} / {{ row.tickets }}</td>
+        <td><a class="button small" href="/check-in/{{ row.event.id }}">Open the door</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="empty">No published event has tickets yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
