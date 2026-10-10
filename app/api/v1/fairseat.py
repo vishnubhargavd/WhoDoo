@@ -24,7 +24,7 @@ from app.schemas.fairseat import (
     QuoteRequest,
     ReservationRequest,
 )
-from app.services import fairseat_service
+from app.services import fairseat_payments, fairseat_service
 
 
 def require_fairseat() -> None:
@@ -116,7 +116,12 @@ async def get_booking(
 async def cancel_booking(
     booking_id: uuid.UUID, user: CurrentUser = Depends(get_purchaser), db: AsyncSession = Depends(get_db)
 ) -> BookingOut:
-    """Give up your own hold or free booking. Its seats go back on sale and its tickets are revoked."""
+    """Give up your own booking. Its seats go back on sale and its tickets are revoked. A paid
+    booking is refunded in full; `refund_status` says how far the refund has got."""
     booking = await fairseat_service.cancel_booking(db, user, booking_id)
     await db.commit()
+    if booking.refund_status == "required":
+        # A paid booking: the seats are already back on sale. Now return the money, outside the locks.
+        await fairseat_payments.process_refund(db, booking_id)
+        booking = await fairseat_service.get_booking(db, user, booking_id)
     return booking

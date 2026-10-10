@@ -294,9 +294,10 @@ async def guard_status_change(db: AsyncSession, event: Event, new_status: str, n
     """Refuse status changes that would strand bookings; validate tickets when publishing.
     Runs inside the same transaction as the status change itself.
 
-    Cancelling: unpaid holds and free bookings are released here and their tickets revoked.
-    If any booking has been paid for, the cancellation is refused: undoing a payment needs a
-    verified refund, and that workflow does not exist yet.
+    Cancelling: every hold and booking is released here and its tickets revoked. Paid bookings
+    are marked as owing a refund, which the route sends after it commits (never under these
+    locks). With ticket payments switched off there is no way to refund, so a paid booking
+    blocks the cancellation.
     """
     if not enabled():
         return
@@ -309,10 +310,10 @@ async def guard_status_change(db: AsyncSession, event: Event, new_status: str, n
         raise conflict("ticket_sales_started", f"{booked} seats are booked, so this event cannot go back to draft")
     if new_status == "cancelled":
         paid = await ticket_inventory.paid_bookings(db, event.id)
-        if paid:
+        if paid and not get_settings().fairseat_payments_enabled:
             raise conflict(
                 "cancellation_requires_refunds",
-                f"{paid} booking(s) have been paid for. Cancelling needs the refund workflow, which is not connected yet",
+                f"{paid} booking(s) have been paid for. Cancelling needs ticket refunds, which are switched off",
                 {"paid_bookings": paid},
             )
         if booked:

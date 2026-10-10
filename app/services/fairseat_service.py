@@ -24,7 +24,7 @@ has marked it expired yet. `expire_holds` and the booking path only tidy the sta
 Ticket settings and categories are written in one place, ticket_service.save_config.
 The category routes here are a second door to that same writer.
 
-Not in this phase: payment, ledger entries, QR credentials, waitlists.
+Payment, ledger entries and refunds are fairseat_payments. Not built: QR credentials, waitlists.
 """
 
 import hashlib
@@ -161,6 +161,7 @@ async def _present(
             total_price_paise=booking.total_price_paise, currency=booking.currency,
             discount_applied=booking.discount_applied, discount_explanation=booking.discount_explanation,
             hold_expires_at=None if lapsed else booking.hold_expires_at,
+            paid_at=booking.paid_at, refund_status=booking.refund_status, refund_reason=booking.refund_reason,
             tickets=tickets.get(booking.id, []), created_at=booking.created_at,
         ))
     return out
@@ -463,12 +464,12 @@ async def reserve(
     return (await _present(session, [booking], now))[0]
 
 
-async def _revoke_tickets(session: AsyncSession, booking_id: uuid.UUID, now: datetime) -> None:
+async def _revoke_tickets(session: AsyncSession, booking_id: uuid.UUID, now: datetime, *, even_if_used: bool = False) -> None:
     used = await session.scalar(
         select(func.count()).select_from(EventTicket)
         .where(EventTicket.booking_id == booking_id, EventTicket.status == "checked_in")
     )
-    if used:
+    if used and not even_if_used:
         raise conflict("ticket_already_used", "A ticket from this booking has already been used at the door.")
     await session.execute(
         update(EventTicket)
@@ -478,15 +479,30 @@ async def _revoke_tickets(session: AsyncSession, booking_id: uuid.UUID, now: dat
     )
 
 
-async def _release(session: AsyncSession, booking: TicketBooking, now: datetime) -> None:
-    """Give a locked booking's seats back. Unpaid holds and free bookings only."""
+async def _release(
+    session: AsyncSession, booking: TicketBooking, event: Event, now: datetime, *, reason: str = "cancelled_by_purchaser",
+    by_organiser: bool = False,
+) -> None:
+    """Give a locked booking's seats back. The caller holds the event, settings and category locks.
+
+    A paid booking is cancelled here and marked as owing a refund; the money is sent back
+    afterwards, outside the locks, by fairseat_payments.process_refund. It is not shown as
+    refunded until the provider confirms it.
+    """
     if booking.status == "pending_payment":
         booking.status = "expired" if booking.hold_expires_at <= now else "cancelled"
     elif booking.status == "confirmed" and booking.payment_status == "not_required":
-        await _revoke_tickets(session, booking.id, now)
+        await _revoke_tickets(session, booking.id, now, even_if_used=by_organiser)
         booking.status = "cancelled"
     elif booking.status == "confirmed":
-        raise conflict("refund_required", "A paid booking is cancelled through a refund, which is not available yet.")
+        if not get_settings().fairseat_payments_enabled:
+            raise conflict("refund_required", "A paid booking is cancelled through a refund, which is not switched on.")
+        if not by_organiser and event.starts_at is not None and now >= event.starts_at:
+            raise conflict("event_started", "This event has already started, so the booking can no longer be cancelled.")
+        await _revoke_tickets(session, booking.id, now, even_if_used=by_organiser)
+        booking.status = "cancelled"
+        booking.refund_status = "required"
+        booking.refund_reason = reason
     else:
         return  # already cancelled or expired: nothing to give back
     booking.hold_expires_at = None
@@ -498,7 +514,8 @@ async def _release(session: AsyncSession, booking: TicketBooking, now: datetime)
 async def cancel_booking(
     session: AsyncSession, user: CurrentUser, booking_id: uuid.UUID, now: datetime | None = None
 ) -> BookingOut:
-    """The purchaser gives up a hold or a free booking. Cancelling again changes nothing."""
+    """The purchaser gives up a booking. Cancelling again changes nothing. For a paid booking
+    the caller must then run fairseat_payments.process_refund, after committing."""
     now = now or utcnow()
     found = (await session.execute(
         select(B.event_id, B.ticket_category_id, B.purchaser_user_id).where(B.id == booking_id)
@@ -506,10 +523,10 @@ async def cancel_booking(
     if found is None or found.purchaser_user_id != user.id:
         raise not_found("Booking")
     # Same lock order as booking: event, settings, category, then the booking row itself.
-    await ticket_locks.lock_for_event(session, found.event_id, [found.ticket_category_id])
+    event, _, _ = await ticket_locks.lock_for_event(session, found.event_id, [found.ticket_category_id])
     booking = await ticket_locks.lock_booking(session, booking_id)
     before = booking.status
-    await _release(session, booking, now)
+    await _release(session, booking, event, now)
     await session.flush()
     if booking.status != before:
         audit_service.record(
@@ -568,26 +585,32 @@ async def get_booking(
 # Called by ticket_service.guard_status_change, inside the event's own status transaction.
 
 
-async def release_bookings_for_event(session: AsyncSession, event_id: uuid.UUID, now: datetime | None = None) -> int:
+async def release_bookings_for_event(
+    session: AsyncSession, event_id: uuid.UUID, now: datetime | None = None
+) -> list[uuid.UUID]:
     """Call when an event is cancelled, in the same transaction as the status change.
 
-    Gives back every hold and free booking and revokes their tickets. Refuses, changing
-    nothing, if any booking has been paid for: those need the refund workflow, which does
-    not exist yet, so the cancellation must not go ahead.
+    Gives back every hold and booking and revokes their tickets. Returns the ids of paid
+    bookings, which are now marked as owing a refund: after committing, the caller passes
+    each to fairseat_payments.process_refund.
+
+    If ticket payments are switched off and a paid booking exists, it refuses and changes
+    nothing, because there would be no way to return the money.
     """
     now = now or utcnow()
-    await ticket_locks.lock_for_event(session, event_id)  # event, settings, every category
+    event, _, _ = await ticket_locks.lock_for_event(session, event_id)  # event, settings, every category
     bookings = list(await session.scalars(
         select(B).where(B.event_id == event_id, B.status.in_(("pending_payment", "confirmed")))
         .order_by(B.id).with_for_update().execution_options(populate_existing=True)
     ))
-    paid = sum(booking.payment_status == "paid" for booking in bookings)
-    if paid:
+    paid = [booking for booking in bookings if booking.payment_status == "paid"]
+    if paid and not get_settings().fairseat_payments_enabled:
         raise conflict(
             "paid_bookings_exist",
-            f"{paid} paid booking(s) must be refunded before this event can be cancelled.", {"paid_bookings": paid},
+            f"{len(paid)} paid booking(s) must be refunded before this event can be cancelled.",
+            {"paid_bookings": len(paid)},
         )
     for booking in bookings:
-        await _release(session, booking, now)
+        await _release(session, booking, event, now, reason="event_cancelled", by_organiser=True)
     await session.flush()
-    return len(bookings)
+    return [booking.id for booking in paid]

@@ -1,6 +1,16 @@
 from fastapi import APIRouter
 
-from app.api.v1 import event_tickets, events, expenses, fairseat, ledger, merch, payments, tasks
+from app.api.v1 import (
+    event_tickets,
+    events,
+    expenses,
+    fairseat,
+    fairseat_payments,
+    ledger,
+    merch,
+    payments,
+    tasks,
+)
 
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(ledger.router)
@@ -15,3 +25,4 @@ api_router.include_router(fairseat.router)
 # Member 2: FairSeat event side (ticket settings, event discovery), same switch
 api_router.include_router(event_tickets.router)
 api_router.include_router(event_tickets.discovery)
+api_router.include_router(fairseat_payments.router)

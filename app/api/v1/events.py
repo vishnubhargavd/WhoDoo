@@ -14,7 +14,7 @@ from app.schemas.events import (
     ReadinessOut,
     ScheduleCheckOut,
 )
-from app.services import event_service, task_service
+from app.services import event_service, fairseat_payments, task_service
 
 router = APIRouter(prefix="/events", tags=["Event Management"])
 
@@ -71,6 +71,10 @@ async def change_status(
     event = await event_service.get_visible_event(db, user, event_id)
     await event_service.change_status(db, user, event, body.status)
     await db.commit()
+    if body.status == "cancelled":
+        # Paid tickets were released inside that transaction and now owe refunds. The payment
+        # provider is called only here, after the commit, with no locks held.
+        await fairseat_payments.refund_cancelled_event(db, event_id)
     return await _one(db, user, event)
 
 

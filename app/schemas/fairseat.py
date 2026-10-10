@@ -140,5 +140,50 @@ class BookingOut(BaseModel):
     discount_applied: bool
     discount_explanation: str
     hold_expires_at: datetime | None
+    paid_at: datetime | None = None
+    refund_status: Literal["required", "pending", "succeeded", "failed"] | None = None
+    refund_reason: str | None = None
     tickets: list[TicketOut] = []
     created_at: datetime
+
+
+# --- Ticket payments -------------------------------------------------------------------
+
+
+class TicketCheckoutRequest(_Strict):
+    """Only which booking to pay for. The amount comes from the booking's stored price."""
+
+    booking_id: uuid.UUID
+
+
+class TicketCheckoutOut(BaseModel):
+    booking_id: uuid.UUID
+    provider: Literal["stripe", "mock"]
+    is_mock: bool
+    session_id: str
+    checkout_url: str | None = Field(description="Stripe's hosted checkout page. Null with the mock provider")
+    amount: int = Field(description="In paise, from the booking")
+    currency: str
+    hold_expires_at: datetime
+
+
+class TicketVerifyRequest(_Strict):
+    session_id: str = Field(min_length=5, max_length=200)
+
+
+class TicketPaymentOut(BaseModel):
+    """What happened to a payment. `outcome` is the thing to act on."""
+
+    outcome: Literal["confirmed", "refund_required", "refund_pending", "refunded", "refund_failed"]
+    message: str
+    booking: BookingOut
+
+
+class TicketMockSimulate(_Strict):
+    session_id: str = Field(min_length=5, max_length=200)
+    outcome: Literal["success", "failure"] = "success"
+
+
+class TicketWebhookAck(BaseModel):
+    status: Literal["processed", "ignored", "duplicate"]
+    detail: str | None = None
