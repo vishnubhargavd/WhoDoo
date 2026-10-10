@@ -58,14 +58,24 @@ async def gala(db, world):
 
 @pytest.fixture
 def category(client, auth, world, gala):
+    """Add a ticket category to the event the way an organizer does: by saving the event's
+    whole ticket configuration, with the event's capacity grown to match (strict partition).
+    Sales are on and the event's booking window runs from two days ago to its start."""
+
     async def _category(capacity=10, price=25000, name="General", event=None, **extra):
         event = event or gala
-        body = {"event_id": str(event.id), "name": name, "base_price_paise": price, "capacity": capacity,
-                "sales_open_at": (NOW - timedelta(days=1)).isoformat(),
-                "sales_close_at": (event.starts_at - timedelta(hours=1)).isoformat()} | extra
-        response = await client.post(f"{API}/ticket-categories", headers=auth(world.president), json=body)
-        assert response.status_code == 201, response.text
-        return response.json()
+        url = f"{API}/events/{event.id}/tickets"
+        current = (await client.get(url, headers=auth(world.president))).json()
+        kept = [{key: c[key] for key in ("id", "name", "description", "price_paise", "capacity",
+                                         "member_discount_eligible", "is_visible")} for c in current["categories"]]
+        new = {"name": name, "price_paise": price, "capacity": capacity, "is_visible": extra.pop("active", True)} | extra
+        body = {"sales_enabled": True, "capacity": current["allocated"] + capacity, "max_per_booking": 6,
+                "opens_at": (NOW - timedelta(days=2)).isoformat(), "closes_at": event.starts_at.isoformat(),
+                "categories": kept + [new]}
+        saved = await client.put(url, headers=auth(world.president), json=body)
+        assert saved.status_code == 200, saved.text
+        listed = (await client.get(f"{API}/ticket-categories?event_id={event.id}", headers=auth(world.president))).json()
+        return next(item for item in listed if item["name"] == name)
 
     return _category
 
@@ -372,7 +382,7 @@ async def test_an_expired_hold_frees_its_seat_without_any_sweeper(client, db, wo
 
 
 async def test_sweeping_expired_holds_and_concurrent_sweeps(client, db, world, auth, category, book):
-    cats = [await category(capacity=3, name=name) for name in ("A", "B", "C")]
+    cats = [await category(capacity=3, name=name) for name in ("Tier A", "Tier B", "Tier C")]
     for cat in cats:
         for buyer in (world.member, world.outsider):
             assert (await book(buyer, cat)).status_code == 201
@@ -442,7 +452,7 @@ async def test_waitlist_is_explicitly_unavailable(client, db, world, auth, categ
 async def test_booking_window_boundaries(db, world, gala, category):
     opens, closes = NOW + timedelta(days=1), NOW + timedelta(days=2)
     cat = await category(capacity=50, sales_open_at=opens.isoformat(), sales_close_at=closes.isoformat())
-    until_start = await category(capacity=50, name="Door", sales_close_at=gala.starts_at.isoformat())
+    until_start = await category(capacity=50, name="Door")  # no window of its own: the event's, which ends at the start
     selection = {"event_id": cat["event_id"], "ticket_category_id": cat["id"], "quantity": 1}
 
     async def attempt(moment, chosen=selection):
@@ -576,25 +586,55 @@ async def test_identity_price_and_status_cannot_come_from_the_request(client, db
 
 
 async def test_who_can_set_up_and_see_tickets(client, db, world, auth, gala, category, book):
-    setup = {"event_id": str(gala.id), "name": "Balcony", "base_price_paise": 40000, "capacity": 20,
-             "sales_open_at": NOW.isoformat(), "sales_close_at": (gala.starts_at - timedelta(hours=2)).isoformat()}
+    """The per-category routes are a second door to the one category writer."""
+    setup = {"event_id": str(gala.id), "name": "Balcony", "base_price_paise": 40000, "capacity": 20}
+    # No ticket settings yet: the event's capacity and booking window come first.
+    early = await client.post(f"{API}/ticket-categories", headers=auth(world.president), json=setup)
+    assert early.status_code == 409 and code(early) == "ticketing_not_configured"
+
+    general = await category(capacity=30, name="General")          # settings now exist, sales on, 30 of 30 allocated
     for person in (world.member, world.volunteer, world.treasurer, world.lead2):  # lead2 leads a different event
         assert (await client.post(f"{API}/ticket-categories", headers=auth(person), json=setup)).status_code == 403
+
+    # While sales are on the categories must add up to the event's capacity exactly, by either door.
+    unbalanced = await client.post(f"{API}/ticket-categories", headers=auth(world.lead), json=setup)
+    assert unbalanced.status_code == 400 and code(unbalanced) == "over_allocated"
+    config_url = f"{API}/events/{gala.id}/tickets"
+    current = (await client.get(config_url, headers=auth(world.lead))).json()
+    paused = {key: current[key] for key in ("capacity", "opens_at", "closes_at", "max_per_booking")} | {
+        "sales_enabled": False, "capacity": 50,
+        "categories": [{key: c[key] for key in ("id", "name", "price_paise", "capacity")} for c in current["categories"]]}
+    assert (await client.put(config_url, headers=auth(world.lead), json=paused)).status_code == 200
+
     by_lead = await client.post(f"{API}/ticket-categories", headers=auth(world.lead), json=setup)
-    assert by_lead.status_code == 201
+    assert by_lead.status_code == 201, by_lead.text
     balcony = by_lead.json()
+    assert (balcony["capacity"], balcony["sort_order"], balcony["member_discount_eligible"], balcony["on_sale"]) == (20, 1, True, False)
     duplicate = await client.post(f"{API}/ticket-categories", headers=auth(world.president), json=setup | {"name": " balcony "})
     assert duplicate.status_code == 409 and code(duplicate) == "duplicate_category"
-    late_close = await client.post(f"{API}/ticket-categories", headers=auth(world.president), json=setup | {
-        "name": "Late", "sales_close_at": (gala.starts_at + timedelta(minutes=1)).isoformat()})
-    assert late_close.status_code == 400 and code(late_close) == "sales_close_after_start"
+    too_big = await client.post(f"{API}/ticket-categories", headers=auth(world.president), json=setup | {"name": "Extra", "capacity": 1})
+    assert too_big.status_code == 400 and code(too_big) == "over_allocated"
+    outside = await client.post(f"{API}/ticket-categories", headers=auth(world.president), json=setup | {
+        "name": "Late", "capacity": 1, "sales_open_at": NOW.isoformat(),
+        "sales_close_at": (gala.starts_at + timedelta(minutes=1)).isoformat()})
+    assert outside.status_code == 400 and code(outside) in ("over_allocated", "category_window_outside_event")
     naive = await client.post(f"{API}/ticket-categories", headers=auth(world.president), json=setup | {
-        "name": "Naive", "sales_open_at": "2026-10-01T10:00:00"})
+        "name": "Naive", "sales_open_at": "2026-10-01T10:00:00", "sales_close_at": "2026-10-02T10:00:00"})
     assert naive.status_code == 422
+    assert (await client.put(config_url, headers=auth(world.lead), json=paused | {"sales_enabled": True, "categories": [
+        {"id": general["id"], "name": "General", "price_paise": 25000, "capacity": 30},
+        {"id": balcony["id"], "name": "Balcony", "price_paise": 40000, "capacity": 20}]})).status_code == 200
 
     update_url = f"{API}/ticket-categories/{balcony['id']}"
     assert (await client.patch(update_url, headers=auth(world.member), json={"capacity": 500})).status_code == 403
     assert (await client.patch(update_url, headers=auth(world.lead2), json={"capacity": 500})).status_code == 403
+    # A category window can narrow the event's, never widen it.
+    wider = await client.patch(update_url, headers=auth(world.lead), json={
+        "sales_open_at": (NOW - timedelta(days=30)).isoformat(), "sales_close_at": gala.starts_at.isoformat()})
+    assert wider.status_code == 400 and code(wider) == "category_window_outside_event"
+    narrowed = await client.patch(update_url, headers=auth(world.lead), json={
+        "sales_open_at": (NOW - timedelta(hours=1)).isoformat(), "sales_close_at": (gala.starts_at - timedelta(hours=2)).isoformat()})
+    assert narrowed.status_code == 200 and narrowed.json()["on_sale"] is True
 
     held = (await book(world.member, balcony, quantity=3)).json()
     # The purchaser, the event's lead and the president can read the booking; others cannot.
@@ -603,18 +643,25 @@ async def test_who_can_set_up_and_see_tickets(client, db, world, auth, gala, cat
         seen = await client.get(f"{API}/ticket-bookings/{held['booking_id']}", headers=auth(person))
         assert seen.status_code == expected, person.full_name
 
-    # Capacity can shrink to the seats taken, never below.
-    shrink = await client.patch(update_url, headers=auth(world.lead), json={"capacity": 2})
-    assert shrink.status_code == 409 and code(shrink) == "capacity_below_occupied"
-    assert shrink.json()["error"]["details"] == {"occupied": 3, "requested": 2}
-    exact = await client.patch(update_url, headers=auth(world.lead), json={"capacity": 3})
-    assert exact.status_code == 200 and (exact.json()["capacity"], exact.json()["available"]) == (3, 0)
+    # A category cannot shrink below the seats taken in it, by either door.
+    by_config = await client.put(config_url, headers=auth(world.lead), json=paused | {"sales_enabled": True, "capacity": 32, "categories": [
+        {"id": general["id"], "name": "General", "price_paise": 25000, "capacity": 30},
+        {"id": balcony["id"], "name": "Balcony", "price_paise": 40000, "capacity": 2}]})
+    assert by_config.status_code == 409 and code(by_config) in ("category_locked", "capacity_below_occupied")
+    # Shrinking alone breaks the partition while sales are on; with the event's capacity it is fine.
+    alone = await client.patch(update_url, headers=auth(world.lead), json={"capacity": 3})
+    assert alone.status_code == 400 and code(alone) == "unallocated_seats"
+    exact = await client.put(config_url, headers=auth(world.lead), json=paused | {"sales_enabled": True, "capacity": 33, "categories": [
+        {"id": general["id"], "name": "General", "price_paise": 25000, "capacity": 30},
+        {"id": balcony["id"], "name": "Balcony", "price_paise": 40000, "capacity": 3}]})
+    assert exact.status_code == 200, exact.text
     assert code(await book(world.outsider, balcony)) == "sold_out"
+    assert await occupied(db, balcony) == 3
 
     await db.execute(text("UPDATE events SET status = 'cancelled' WHERE id = :id"), {"id": gala.id})
     await db.commit()
-    closed = await client.patch(update_url, headers=auth(world.president), json={"capacity": 50})
-    assert closed.status_code == 409 and code(closed) == "event_closed"
+    closed = await client.patch(update_url, headers=auth(world.president), json={"name": "Renamed"})
+    assert closed.status_code == 400 and code(closed) == "event_closed"
 
 
 # --- Purchaser limit -------------------------------------------------------------------------
