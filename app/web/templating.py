@@ -79,11 +79,14 @@ SECTIONS = (
         ("Dashboard", "/treasurer", FINANCE_ROLES),
         ("Ledger", "/treasurer/ledger", FINANCE_ROLES),
     )),
+    ("Connect", (
+        ("Announcements", "/announcements", None),
+    )),
 )
 # Pages that belong to a link without sharing its path.
 ALIASES = {"/checkout": "/orders"}
 # Modules owned by other team members that are not in this application yet.
-COMING_SOON = ("Memberships", "Tickets", "Check-in", "Announcements", "Certificates")
+COMING_SOON = ("Memberships", "Tickets", "Check-in", "Certificates")
 
 
 def navigation(user: CurrentUser | None, path: str) -> dict:

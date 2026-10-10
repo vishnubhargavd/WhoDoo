@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Club Announcements · WhoDoo Connect{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 1rem;">
+  <div>
+    <h1>Club Announcements</h1>
+    <p class="sub">WhoDoo Connect: Official broadcast updates, notifications, and reminders.</p>
+  </div>
+</div>
+
+{% if error %}
+<div class="card" style="border-left: 4px solid var(--neg, #dc2626); margin-bottom: 1.5rem; padding: 1rem;">
+  <p style="color: var(--neg, #dc2626); margin: 0; font-weight: 500;">{{ error }}</p>
+</div>
+{% endif %}
+
+{% if can_post %}
+<div class="card" style="margin-bottom: 2rem;">
+  <h2>Broadcast New Announcement</h2>
+  <form method="POST" action="/announcements" style="margin-top: 1rem; display: grid; gap: 1rem;">
+    <div>
+      <label for="title" style="display: block; font-weight: 500; font-size: 0.875rem; margin-bottom: 0.25rem;">Title</label>
+      <input type="text" id="title" name="title" required placeholder="Important update: General Body Meeting this Friday" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+      <div>
+        <label for="target_audience" style="display: block; font-weight: 500; font-size: 0.875rem; margin-bottom: 0.25rem;">Target Audience</label>
+        <select id="target_audience" name="target_audience" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+          <option value="all">Everyone in club</option>
+          <option value="members">Verified members only</option>
+          <option value="volunteers">Crew &amp; Volunteers</option>
+        </select>
+      </div>
+      <div style="display: flex; align-items: center; padding-top: 1.5rem;">
+        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.875rem;">
+          <input type="checkbox" name="is_pinned" value="1">
+          <strong>Pin to top of announcement feed</strong>
+        </label>
+      </div>
+    </div>
+
+    <div>
+      <label for="content" style="display: block; font-weight: 500; font-size: 0.875rem; margin-bottom: 0.25rem;">Announcement Details</label>
+      <textarea id="content" name="content" rows="4" required placeholder="Write the full announcement details here..." style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit;"></textarea>
+    </div>
+
+    <div>
+      <button type="submit" class="button primary">Publish Announcement</button>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Live Feed</h2>
+  {% if announcements %}
+  <div style="display: grid; gap: 1.25rem; margin-top: 1rem;">
+    {% for item in announcements %}
+    <div style="border: 1px solid #e2e8f0; border-radius: 8px; padding: 1.25rem; background: {% if item.is_pinned %}#fefce8{% else %}#ffffff{% endif %}; border-left: {% if item.is_pinned %}4px solid #ca8a04{% else %}1px solid #e2e8f0{% endif %};">
+      <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          {% if item.is_pinned %}
+          <span class="badge" style="background: #fef08a; color: #854d0e; font-weight: 600;">📌 PINNED</span>
+          {% endif %}
+          <span class="badge" style="text-transform: uppercase;">{{ item.target_audience }}</span>
+          <h3 style="margin: 0; font-size: 1.15rem; font-weight: 600;">{{ item.title }}</h3>
+        </div>
+        <div style="font-size: 0.8rem; color: #64748b;">
+          {{ item.created_at | nice_date }}
+        </div>
+      </div>
+      <div style="margin-top: 0.75rem; font-size: 0.95rem; line-height: 1.5; color: #334155; white-space: pre-wrap;">{{ item.content }}</div>
+      <div style="margin-top: 0.75rem; font-size: 0.8rem; color: #64748b; border-top: 1px solid #f1f5f9; padding-top: 0.5rem;">
+        Posted by <strong>{{ item.author_name }}</strong>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">No announcements posted yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

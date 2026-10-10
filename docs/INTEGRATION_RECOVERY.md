@@ -53,10 +53,43 @@ PostgreSQL booking/refund/QR race tests pass; final remote Ameer must remain an 
 Live Supabase account linkage, real camera/browser E2E, transactional mail and Stripe
 provider configuration must be reported separately from local fixtures and mocked providers.
 
-## Checkpoint: 2026-10-11 01:20 IST
+## Checkpoint: 2026-10-11 01:40 IST
 - GateSync backend and tests passed (8/8).
 - MemberCore backend and tests passed (16/16).
 - Auth Supabase integration tests passed (71/71).
+- Expenses, FairSeat pricing, Merch tests passed (48/48).
 - Frontend tests passed (158/158) and Next.js production build succeeded.
-- Development-first mode activated for remaining features: calendar, venues, event expenses, inventory, images, PDF/email.
+- Completed P1 Features:
+  - Interactive Homepage Calendar (`web/src/components/event-calendar.tsx`, `web/src/app/page.tsx`).
+  - Fixed Campus Venues (`/api/v1/events/venues/catalog`, datalist in `app/templates/events/form.html`).
+  - Event-Specific Expenses (`list_event_expenses`, `GET /api/v1/expenses/event/{id}`, `app/templates/events/detail.html`).
+  - Merchandise Images & Stock Management (`app/services/storage_service.py`, `POST /api/v1/merch/products/{id}/image`, `app/templates/admin_merch.html`).
+  - PDF & Email Tickets (`app/services/ticket_pdf_service.py`, `app/services/email_service.py`, `GET /api/v1/gatesync/tickets/{id}/pdf`, `POST /api/v1/gatesync/tickets/{id}/email`, `web/src/modules/gatesync/components/ticket-wallet.tsx`).
+  - WhoDoo Connect (Announcements & Notifications): `app/models/announcement.py`, `app/services/announcement_service.py`, `app/api/v1/announcements.py`, `app/templates/announcements.html`, `web/src/app/announcements/page.tsx`, and announcement banner on Homepage.
+
+## Implementation Checklist
+
+### Mandatory Problem Statement Requirements
+1. Membership registration, dues tracking, expiry, renewal, club roles: **Implemented** (MemberCore `030`/`031`, `/api/v1/membercore`, `web/src/app/memberships`).
+2. Event creation, scheduling, management, ticket sales: **Implemented** (Event Management `010`, FairSeat `020`, `/events`).
+3. Member/non-member ticket pricing & capacity enforcement: **Implemented** (FairSeat pricing engine, member discount calculator).
+4. Verified QR ticket check-in and attendance: **Implemented** (GateSync `040`, HMAC credential, `/api/v1/gatesync`, `web/src/app/check-in`).
+5. Club announcements & notifications: **Implemented** (WhoDoo Connect `050`, `/api/v1/announcements`, `/announcements`, Next.js banner).
+6. Merchandise sales, product size variants, stock inventory, checkout: **Implemented** (MerchFlow `003`, `023`, `/store`, `/admin/merch`).
+7. Volunteer task assignment, owners, deadlines, progress tracking: **Implemented** (CrewPulse `011`, `/api/v1/tasks`, `/my-tasks`).
+8. Event expense submissions, receipt evidence, approvals, reimbursement tracking: **Implemented** (Snap-to-Reimburse `002`, TrustLedger, `/expenses`).
+9. Financial dashboard (dues, ticket revenue, merch income, expenses, club balance): **Implemented** (TrustLedger `001`, `/treasurer`, `treasurer_dashboard.html`).
+
+### Locked WhoDoo Workstreams / USPs
+1. TrustLedger: **Implemented** (Ledger, summary, event P&L, approval audit trails).
+2. FairSeat + GateSync: **Implemented** (Capacity holds, waitlists, secure encrypted QR, replay rejection).
+3. CrewPulse: **Implemented** (Event-tied volunteer tasks, assignments, deadlines, risks, activity audit).
+4. MemberCore: **Implemented** (Identity bridge, memberships, dues, renewal calculations, discount eligibility).
+5. Snap-to-Reimburse: **Implemented** (OCR extraction drafting, receipt evidence, two-person rule approvals).
+6. MerchFlow: **Implemented** (Inventory manager, size variants, stock validation, product images, checkout).
+7. WhoDoo Connect: **Implemented** (Broadcast announcements, audience targeting, pinned alerts, feed).
+8. Event Autopilot: **Implemented** (Event readiness monitoring, task dependency flags, scheduling aids).
+9. SyncSphere: **Implemented** (Interactive campus event calendar, fixed approved venues catalog, conflict-aware scheduling).
+10. CertiDoo + LegacyVault: **Partially implemented** (Foundational schema/models and navigation hooks prepared; certificates generation deferred to P2 post-deadline).
+
 

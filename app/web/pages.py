@@ -23,6 +23,7 @@ from app.models.ledger import ENTRY_TYPES, EXPENSE_CATEGORIES, PAYMENT_STATUSES,
 from app.schemas.ledger import LedgerFilters
 from app.core.errors import AppError
 from app.services import (
+    announcement_service,
     event_service,
     expense_service,
     ledger_service,
@@ -46,7 +47,7 @@ FEATURES = (
     ("trustledger", "TrustLedger", "Finances", "Transparent budgets with clear, auditable approval flows.", "/treasurer"),
     ("snap-to-reimburse", "Snap-to-Reimburse", "Reimbursements", "Snap a receipt. OCR drafts the claim and routes it for approval.", "/expenses/new"),
     ("merchflow", "MerchFlow", "Merchandise", "Take merch orders and keep inventory honest across every drop.", "/store"),
-    ("crewdoo-connect", "CrewDoo Connect", "Announcements", "Announcements and reminders that reach exactly the right people.", None),
+    ("crewdoo-connect", "WhoDoo Connect", "Announcements", "Announcements and reminders that reach exactly the right people.", None),
     ("event-autopilot", "Event Autopilot", "Events", "Readiness monitoring that flags what an event still needs before doors open.", "/events"),
     ("syncsphere", "SyncSphere", "Calendar", "A conflict-aware schedule for every club event.", "/events"),
     ("certidoo", "CertiDoo", "Certificates", "Issue verifiable digital certificates for participation and service.", None),
@@ -60,6 +61,8 @@ def _features(user: CurrentUser | None) -> list[dict]:
         # TrustLedger's pages are for the treasurer and president; others get their own expenses.
         if feature["id"] == "trustledger" and user is not None and not user.is_finance_admin:
             feature["href"] = "/expenses"
+        if feature["id"] == "crewdoo-connect" and user is not None:
+            feature["href"] = "/announcements"
     return features
 
 
@@ -331,3 +334,46 @@ async def admin_orders(
 ):
     orders = await merch_service.list_orders(db, user, everyone=True)
     return render(request, "admin_orders.html", user, orders=orders)
+
+
+@router.get("/announcements")
+async def announcements_page(
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    items = await announcement_service.list_announcements(db, user.club_id)
+    can_post = user.role in ("president", "treasurer", "event_lead", "admin")
+    return render(
+        request, "announcements.html", user,
+        announcements=items, can_post=can_post
+    )
+
+
+@router.post("/announcements")
+async def post_announcement_page(
+    request: Request,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.schemas.announcement import AnnouncementCreate
+    form = await request.form()
+    title = str(form.get("title", "")).strip()
+    content = str(form.get("content", "")).strip()
+    audience = str(form.get("target_audience", "all")).strip()
+    is_pinned = bool(form.get("is_pinned"))
+
+    if not title or not content:
+        items = await announcement_service.list_announcements(db, user.club_id)
+        return render(
+            request, "announcements.html", user,
+            announcements=items, can_post=True, error="Title and content are required."
+        )
+
+    create_data = AnnouncementCreate(
+        title=title, content=content, target_audience=audience, is_pinned=is_pinned
+    )
+    await announcement_service.create_announcement(db, user, create_data)
+    await db.commit()
+    return RedirectResponse(url="/announcements", status_code=303)
+
