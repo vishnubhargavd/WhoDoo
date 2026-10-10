@@ -92,6 +92,33 @@ provider configuration must be reported separately from local fixtures and mocke
   - TypeScript: 0 errors (`npm run typecheck`).
   - Unit tests: 158 passed in 6.8s (`npm run test`).
 
+## Batch 3 Progress (Final Core Completion & Live Demo Readiness)
+- Task 1: CrewPulse Complete Volunteer Coordination
+  - Event leads create and assign tasks with status, deadline, progress, and blocker notes.
+  - Activity audit logging captures creation, updates, assignments, status changes, and blocker resolutions.
+  - Unrelated users across clubs/events prevented from modifying tasks.
+  - Clean integration points prepared for parallel developer's clash detection engine without competing engine.
+  - Tests verified: `tests/test_tasks.py` (9 passed in 15.98s).
+  - Commit: `fa56693`.
+- Task 2: FairSeat Waitlist and Released-Seat Lifecycle
+  - Migration `migrations/pending/024_fairseat_waitlist.sql` adds `ticket_waitlist_entries` table.
+  - Full waitlist lifecycle: joining waitlist, FIFO position queue, fair promotion upon cancellation or hold expiration.
+  - Idempotent promotion preserves member pricing via MemberCore discount calculator.
+  - Confirmed free bookings issue genuine GateSync ticket rows (`status="pending_issue"`).
+  - Paid tickets confirmed only upon verified provider payment.
+  - Row-lock hierarchy strictly maintained (Event -> Settings -> Category -> Booking -> Waitlist).
+  - Tests verified: `tests/test_fairseat_waitlist.py` (6 passed in 15.02s), `tests/test_fairseat.py` (29 passed in 80.56s).
+  - Commit: `e8f1217`.
+- Task 3: Real Local Demo Readiness & Campus Venue Catalog
+  - Enforced administrator-configured approved campus venues catalog (`app/core/config.py`, `app/services/event_service.py`, `app/templates/events/form.html`).
+  - Replaced freeform text/fabricated names with dropdown selection and strict backend validation (returning 400 `unapproved_venue` if invalid).
+  - Verified student login -> event discovery -> free booking -> QR wallet -> volunteer check-in end-to-end.
+  - Verified clean startup and rendering across all 9 core web pages (`/`, `/home`, `/events`, `/events/new`, `/store`, `/announcements`, `/expenses`, `/my-tasks`, `/treasurer`).
+  - Frontend verified: Next.js 16 production build succeeded, TypeScript clean, 158 frontend unit tests passed.
+  - Backend verified: `tests/test_demo_readiness.py` (2 passed in 4.12s), `tests/test_events.py` (12 passed in 15.58s), `tests/test_gatesync.py` (8 passed in 15.75s).
+  - Commit: `2ae1c67`.
+
+
 
 ## Implementation Checklist
 
