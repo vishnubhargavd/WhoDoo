@@ -22,8 +22,17 @@ class ScanIn(_Clean):
 
 
 class ManualCheckIn(BaseModel):
+    """One of the two: a FairSeat ticket, or a public registration."""
+
     event_id: uuid.UUID
-    ticket_id: uuid.UUID
+    ticket_id: uuid.UUID | None = None
+    registration_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _one(self):
+        if (self.ticket_id is None) == (self.registration_id is None):
+            raise ValueError("Give a ticket_id or a registration_id")
+        return self
 
 
 # --- CrewDoo Connect --------------------------------------------------------------------

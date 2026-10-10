@@ -46,7 +46,7 @@ async def scan(body: ScanIn, user: CurrentUser = User, db: AsyncSession = Db) ->
 @checkin.post("/manual")
 async def manual(body: ManualCheckIn, user: CurrentUser = User, db: AsyncSession = Db) -> dict:
     """Check in from the guest list. Same rules and answers as a scan."""
-    result = await gatesync_service.admit_from_list(db, user, body.event_id, body.ticket_id)
+    result = await gatesync_service.admit_from_list(db, user, body.event_id, body.ticket_id, body.registration_id)
     await db.commit()
     return result
 

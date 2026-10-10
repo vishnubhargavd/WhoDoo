@@ -65,7 +65,7 @@ async function bookTickets(form) {
 }
 
 document.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-pay-membership], [data-pay-booking], [data-admit]");
+  const button = event.target.closest("[data-pay-membership], [data-pay-booking], [data-admit], [data-admit-registration]");
   if (!button) return;
   event.preventDefault();
   button.disabled = true;
@@ -74,7 +74,9 @@ document.addEventListener("click", async (event) => {
     else if (button.dataset.payBooking) await payBooking(button.dataset.payBooking);
     else {
       const door = document.querySelector("[data-door]");
-      showScan(await api("POST", "/api/v1/check-in/manual", { event_id: door.dataset.door, ticket_id: button.dataset.admit }));
+      const who = button.dataset.admitRegistration
+        ? { registration_id: button.dataset.admitRegistration } : { ticket_id: button.dataset.admit };
+      showScan(await api("POST", "/api/v1/check-in/manual", { event_id: door.dataset.door, ...who }));
       setTimeout(() => window.location.reload(), 1200);
     }
   } catch (error) {
@@ -112,7 +114,9 @@ function showScan(result) {
   box.className = "scan-result " + kind;
   box.hidden = false;
   box.querySelector("strong").textContent = text;
-  const who = result.holderName ? `${result.holderName} · ${result.categoryName} · seat ${result.seatNumber} of ${result.partySize}` : "";
+  let who = "";
+  if (result.holderName && result.studentId) who = `${result.holderName} · student ID ${result.studentId} · ${result.participantCode}`;
+  else if (result.holderName) who = `${result.holderName} · ${result.categoryName} · seat ${result.seatNumber} of ${result.partySize}`;
   const when = result.status === "already_checked_in" ? ` · at ${new Date(result.checkedInAt).toLocaleTimeString()}` : "";
   box.querySelector("span").textContent = who + when;
   if (result.status === "redeemed") {

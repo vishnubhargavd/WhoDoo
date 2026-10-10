@@ -3,8 +3,9 @@
 MemberCore, GateSync, CrewDoo Connect, CertiDoo and LegacyVault keep their tables in
 migrations/pending/, which `make migrate` does not apply. A module is offered only when its
 tables are there (`make migrate-pending` on a local database); otherwise its pages and
-routes answer 404 and the menu keeps showing it as not here yet. Tickets and check-in also
-need FAIRSEAT_ENABLED.
+routes answer 404 and the menu keeps showing it as not here yet. Tickets also need
+FAIRSEAT_ENABLED. Check-in comes with public registration (migrations/012), which is always
+applied, and admits FairSeat tickets too once those are switched on.
 """
 
 from fastapi import Depends
@@ -19,12 +20,12 @@ from app.core.errors import AppError
 MODULES = {
     "memberships": ("Memberships", "membership_checkouts"),
     "tickets": ("Tickets", "event_tickets"),
-    "checkin": ("Check-in", "ticket_redemptions"),
+    "checkin": ("Check-in", "event_registrations"),
     "announcements": ("Announcements", "announcements"),
     "certificates": ("Certificates", "certificates"),
     "handover": ("Handover", "handover_note_versions"),
 }
-NEEDS_FAIRSEAT = ("tickets", "checkin")
+NEEDS_FAIRSEAT = ("tickets",)
 
 _tables: frozenset[str] | None = None
 

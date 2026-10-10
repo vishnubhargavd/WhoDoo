@@ -6,7 +6,8 @@ secret, so the buyer's page can show the same code again without the code ever b
 the database keeps only its SHA-256 digest, which is what a scan is looked up by. The format
 and the digest match web/src/modules/gatesync/credential.ts.
 
-A ticket is admitted once. The scan locks the booking, then the ticket (the order the
+The same credential is used for a public registration (registration_service), looked up in
+event_registrations. A ticket or registration is admitted once. The scan locks the booking, then the ticket (the order the
 booking service uses), and the admission row's primary key is the ticket, so two scanners
 reading the same code at the same moment cannot both let it in.
 """
@@ -27,8 +28,9 @@ from app.core.dependencies import ROLE_EVENT_LEAD, ROLE_PRESIDENT, ROLE_TREASURE
 from app.core.errors import forbidden, not_found
 from app.models.community import TicketRedemption
 from app.models.fairseat import EventTicket, TicketBooking, TicketCategory
+from app.models.registration import EventRegistration as R
 from app.models.shared import Event, User
-from app.services import audit_service
+from app.services import audit_service, modules
 
 PREFIX = "whodoo.ticket.v1."
 # 32 bytes are 43 base64url characters; the last one carries four zero padding bits.
@@ -141,25 +143,40 @@ async def _door_event(session: AsyncSession, user: CurrentUser, event_id: uuid.U
 
 
 async def events_for_door(session: AsyncSession, user: CurrentUser) -> list[dict]:
-    """Published events in the caller's club that have tickets, with how many are in."""
+    """Published events in the caller's club that have anyone to admit, with how many are in."""
     if user.role not in DOOR_STAFF:
         raise forbidden("Only volunteers, event leads, the treasurer and the president can check people in")
-    issued = func.count().filter(EventTicket.status.in_(("issued", "checked_in")))
-    inside = func.count().filter(EventTicket.status == "checked_in")
-    rows = (await session.execute(
-        select(Event, issued, inside)
-        .join(EventTicket, EventTicket.event_id == Event.id)
-        .where(Event.club_id == user.club_id, Event.status == "published")
-        .group_by(Event.id)
+    events = list(await session.scalars(
+        select(Event).where(Event.club_id == user.club_id, Event.status == "published")
         .order_by(Event.starts_at.asc().nulls_last(), Event.name)
-    )).all()
-    return [{"event": event, "tickets": total, "checked_in": done} for event, total, done in rows if total]
+    ))
+    counts: dict[uuid.UUID, list[int]] = {event.id: [0, 0] for event in events}
+
+    def add(rows) -> None:
+        for event_id, total, inside in rows:
+            if event_id in counts:
+                counts[event_id][0] += total
+                counts[event_id][1] += inside
+
+    add((await session.execute(
+        select(R.event_id, func.count(), func.count().filter(R.status == "checked_in"))
+        .where(R.club_id == user.club_id, R.status.in_(("registered", "checked_in")))
+        .group_by(R.event_id)
+    )).all())
+    if modules.has("tickets"):
+        add((await session.execute(
+            select(EventTicket.event_id, func.count(), func.count().filter(EventTicket.status == "checked_in"))
+            .where(EventTicket.status.in_(("issued", "checked_in")))
+            .group_by(EventTicket.event_id)
+        )).all())
+    return [{"event": event, "tickets": counts[event.id][0], "checked_in": counts[event.id][1]}
+            for event in events if counts[event.id][0]]
 
 
 async def _admit(
     session: AsyncSession, scanner: CurrentUser, event: Event, ticket_id: uuid.UUID, method: str, now: datetime
 ) -> dict:
-    """Admit one ticket, or say exactly why not. Booking first, then ticket: the booking service's order."""
+    """Admit one FairSeat ticket, or say exactly why not. Booking first, then ticket: the booking service's order."""
     booking_id = await session.scalar(select(EventTicket.booking_id).where(EventTicket.id == ticket_id))
     booking = await session.scalar(select(TicketBooking).where(TicketBooking.id == booking_id).with_for_update())
     ticket = await session.scalar(select(EventTicket).where(EventTicket.id == ticket_id).with_for_update())
@@ -192,44 +209,94 @@ async def _admit(
             "eventId": str(event.id), "eventName": event.name, **who}
 
 
+async def _admit_registration(
+    session: AsyncSession, scanner: CurrentUser, event: Event, registration_id: uuid.UUID, method: str, now: datetime
+) -> dict:
+    """Admit one registered participant, once. The row lock makes two scanners take turns:
+    the second one finds the registration already checked in."""
+    registration = await session.scalar(select(R).where(R.id == registration_id).with_for_update())
+    if registration is None:
+        return {"status": "unrecognized"}
+    if registration.event_id != event.id:
+        return {"status": "wrong_event"}
+    # Shown to door staff so the name can be matched against a college ID card.
+    who = {"holderName": registration.full_name, "studentId": registration.student_id,
+           "participantCode": registration.participant_code, "categoryName": "Registration"}
+    if registration.status == "checked_in":
+        return {"status": "already_checked_in", "checkedInAt": _iso(registration.checked_in_at), **who}
+    if registration.status != "registered":
+        return {"status": "revoked", **who}
+    if event.status != "published":
+        return {"status": "expired", **who}
+    registration.status, registration.checked_in_at, registration.checked_in_by = "checked_in", now, scanner.id
+    registration.updated_at = now
+    await session.flush()
+    audit_service.record(
+        session, club_id=event.club_id, actor_id=scanner.id, action="gatesync.checked_in",
+        entity_type="event_registration", entity_id=registration.id,
+        details={"event_id": str(event.id), "method": method},
+    )
+    return {"status": "redeemed", "redemptionId": str(registration.id), "checkedInAt": _iso(now),
+            "eventId": str(event.id), "eventName": event.name, **who}
+
+
 async def redeem(
     session: AsyncSession, scanner: CurrentUser, event_id: uuid.UUID, credential: str, now: datetime | None = None
 ) -> dict:
-    """Check a scanned QR code in for this event."""
+    """Check a scanned QR code in for this event: a FairSeat ticket or a public registration."""
     event = await _door_event(session, scanner, event_id)
     digest = digest_of(credential)
     if digest is None:
         return {"status": "invalid_credential"}
-    ticket_id = await session.scalar(select(EventTicket.id).where(EventTicket.credential_digest == digest))
-    if ticket_id is None:
+    now = now or utcnow()
+    if modules.has("tickets"):
+        ticket_id = await session.scalar(select(EventTicket.id).where(EventTicket.credential_digest == digest))
+        if ticket_id is not None:
+            return await _admit(session, scanner, event, ticket_id, "qr", now)
+    registration_id = await session.scalar(select(R.id).where(R.credential_digest == digest))
+    if registration_id is None:
         return {"status": "unrecognized"}
-    return await _admit(session, scanner, event, ticket_id, "qr", now or utcnow())
+    return await _admit_registration(session, scanner, event, registration_id, "qr", now)
 
 
 async def admit_from_list(
-    session: AsyncSession, scanner: CurrentUser, event_id: uuid.UUID, ticket_id: uuid.UUID, now: datetime | None = None
+    session: AsyncSession, scanner: CurrentUser, event_id: uuid.UUID, ticket_id: uuid.UUID | None = None,
+    registration_id: uuid.UUID | None = None, now: datetime | None = None,
 ) -> dict:
     """Check in from the guest list, for a holder whose phone is flat. Same rules as a scan."""
     event = await _door_event(session, scanner, event_id)
+    if registration_id is not None:
+        return await _admit_registration(session, scanner, event, registration_id, "manual", now or utcnow())
+    if ticket_id is None or not modules.has("tickets"):
+        return {"status": "unrecognized"}
     return await _admit(session, scanner, event, ticket_id, "manual", now or utcnow())
 
 
 async def attendance(session: AsyncSession, user: CurrentUser, event_id: uuid.UUID) -> dict:
-    """The guest list for an event: every valid ticket, and who is already in."""
+    """The guest list for an event: everyone with a valid ticket or registration, and who is already in."""
     event = await _door_event(session, user, event_id)
-    rows = (await session.execute(
-        select(EventTicket, User.full_name, TicketCategory.name)
-        .join(TicketBooking, TicketBooking.id == EventTicket.booking_id)
-        .join(User, User.id == EventTicket.holder_user_id)
-        .join(TicketCategory, TicketCategory.id == TicketBooking.ticket_category_id)
-        .where(EventTicket.event_id == event.id, EventTicket.status.in_(("issued", "checked_in")),
-               TicketBooking.status == "confirmed")
-        .order_by(User.full_name, EventTicket.booking_id, EventTicket.seat_number)
-    )).all()
     guests = [
-        {"ticket_id": ticket.id, "holder_name": name, "category": category, "seat_number": ticket.seat_number,
-         "status": ticket.status, "checked_in_at": ticket.checked_in_at}
-        for ticket, name, category in rows
+        {"ticket_id": None, "registration_id": row.id, "holder_name": row.full_name,
+         "category": f"{row.participant_code} · {row.student_id}", "seat_number": None,
+         "status": row.status, "checked_in_at": row.checked_in_at}
+        for row in await session.scalars(
+            select(R).where(R.event_id == event.id, R.status.in_(("registered", "checked_in"))).order_by(R.full_name)
+        )
     ]
+    if modules.has("tickets"):
+        rows = (await session.execute(
+            select(EventTicket, User.full_name, TicketCategory.name)
+            .join(TicketBooking, TicketBooking.id == EventTicket.booking_id)
+            .join(User, User.id == EventTicket.holder_user_id)
+            .join(TicketCategory, TicketCategory.id == TicketBooking.ticket_category_id)
+            .where(EventTicket.event_id == event.id, EventTicket.status.in_(("issued", "checked_in")),
+                   TicketBooking.status == "confirmed")
+            .order_by(User.full_name, EventTicket.booking_id, EventTicket.seat_number)
+        )).all()
+        guests += [
+            {"ticket_id": ticket.id, "registration_id": None, "holder_name": name, "category": category,
+             "seat_number": ticket.seat_number, "status": ticket.status, "checked_in_at": ticket.checked_in_at}
+            for ticket, name, category in rows
+        ]
     return {"event": event, "guests": guests, "total": len(guests),
             "checked_in": sum(guest["status"] == "checked_in" for guest in guests)}

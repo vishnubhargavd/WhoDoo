@@ -23,11 +23,11 @@
     <thead><tr><th>Holder</th><th>Ticket</th><th>Status</th><th></th></tr></thead>
     <tbody>
       {% for g in door.guests %}
-      <tr data-ticket="{{ g.ticket_id }}">
-        <td>{{ g.holder_name }}</td><td>{{ g.category }} · #{{ g.seat_number }}</td>
+      <tr data-ticket="{{ g.registration_id or g.ticket_id }}">
+        <td>{{ g.holder_name }}</td><td>{{ g.category }}{% if g.seat_number %} · #{{ g.seat_number }}{% endif %}</td>
         <td><span class="badge {{ 'paid' if g.status == 'checked_in' else 'pending' }}">{{ "Checked in" if g.status == "checked_in" else "Not arrived" }}</span>
           {% if g.checked_in_at %}<span class="muted">{{ g.checked_in_at | ist('%H:%M') }}</span>{% endif %}</td>
-        <td>{% if g.status != "checked_in" %}<button class="small secondary" data-admit="{{ g.ticket_id }}">Check in</button>{% endif %}</td>
+        <td>{% if g.status != "checked_in" %}<button class="small secondary" {% if g.registration_id %}data-admit-registration="{{ g.registration_id }}"{% else %}data-admit="{{ g.ticket_id }}"{% endif %}>Check in</button>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
