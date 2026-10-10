@@ -11,6 +11,8 @@
     <a class="brand" href="/">WhoDoo</a>
     <nav>
       {% if user %}
+        <a href="/events">Events</a>
+        <a href="/my-tasks">My tasks</a>
         {% if user.role in ("treasurer", "president") %}
           <a href="/treasurer">Dashboard</a>
           <a href="/treasurer/ledger">Ledger</a>

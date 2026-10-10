@@ -7,11 +7,11 @@ See migrations/000_shared_placeholders.sql. Only app/services/shared_directory.p
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, ForeignKey, Text
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, created_at_col, uuid_pk
+from app.models.base import Base, created_at_col, updated_at_col, uuid_pk
 
 
 class Club(Base):
@@ -43,3 +43,11 @@ class Event(Base):
     event_date: Mapped[date | None] = mapped_column(Date)
     lead_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"))
     created_at: Mapped[datetime] = created_at_col()
+    # Event Management columns (Member 2, migrations/010_events.sql). All additive.
+    description: Mapped[str | None] = mapped_column(Text)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    venue: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default="draft")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = updated_at_col()

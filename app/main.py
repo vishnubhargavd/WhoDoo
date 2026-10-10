@@ -11,7 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.v1 import api_router
 from app.core.config import get_settings
 from app.core.errors import AppError
-from app.web import dev_auth, pages
+from app.web import dev_auth, event_pages, pages
 from app.web.templating import APP_DIR, render
 
 logger = logging.getLogger("whodoo")
@@ -31,6 +31,7 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 
 app.include_router(api_router)
 app.include_router(pages.router)
+app.include_router(event_pages.router)
 if settings.demo_auth:
     app.include_router(dev_auth.router)
 

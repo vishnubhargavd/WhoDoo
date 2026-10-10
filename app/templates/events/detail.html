@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}{{ event.name }} · WhoDoo{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/events.css">
+<p><a href="/events">← All events</a></p>
+<div class="actions" style="justify-content: space-between; align-items: flex-start">
+  <div>
+    <h1>{{ event.name }} <span class="badge {{ event.status }}">{{ event.status | label }}</span></h1>
+    <p class="sub">{{ event.starts_at | ist }}{% if event.ends_at %} – {{ event.ends_at | ist('%H:%M') }}{% endif %}{% if event.starts_at %} IST{% endif %}
+      · {{ event.venue or "No venue yet" }} · Lead: {{ event.lead_name or "unassigned" }}</p>
+  </div>
+  {% if organizer %}
+  <div class="actions">
+    {% if event.status in ("draft", "published") %}<a class="button secondary" href="/events/{{ event.id }}/edit">Edit</a>{% endif %}
+    {% for status in event.allowed_statuses %}
+      {% set verbs = {"published": "Publish", "draft": "Back to draft", "cancelled": "Cancel event", "completed": "Mark completed"} %}
+      <button class="{{ 'danger' if status == 'cancelled' else 'success' if status in ('published', 'completed') else 'secondary' }}"
+              data-post="/api/v1/events/{{ event.id }}/status" data-body='{"status": "{{ status }}"}'
+              {% if status == "cancelled" %}data-confirm="Cancel {{ event.name }}? Its tasks will be frozen. This cannot be undone."{% endif %}>
+        {{ verbs[status] }}</button>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+{% if organizer and event.status == "draft" and missing %}
+<div class="notice info">To publish, add: {{ missing | join(", ") }}.</div>
+{% endif %}
+
+<div class="grid two">
+  <section class="card" aria-labelledby="about-title">
+    <h2 id="about-title">Event details</h2>
+    <dl class="kv">
+      <dt>Starts</dt><dd>{{ event.starts_at | ist }}{% if event.starts_at %} IST{% endif %}</dd>
+      <dt>Ends</dt><dd>{{ event.ends_at | ist }}{% if event.ends_at %} IST{% endif %}</dd>
+      <dt>Venue</dt><dd>{{ event.venue or "Not set" }}</dd>
+      <dt>Status</dt><dd>{{ event.status | label }}</dd>
+      <dt>Last updated</dt><dd>{{ event.updated_at | ist }}</dd>
+    </dl>
+    {% if event.description %}<p style="margin: 12px 0 0; white-space: pre-line">{{ event.description }}</p>{% endif %}
+  </section>
+
+  <section class="card" aria-labelledby="organizers-title">
+    <h2 id="organizers-title">Organizers</h2>
+    <dl class="kv">
+      <dt>Event lead</dt><dd>{{ event.lead_name or "Not assigned yet" }}</dd>
+      <dt>Created by</dt><dd>{{ event.created_by_name or "—" }}</dd>
+    </dl>
+    <h2 style="margin-top: 14px">Crew ({{ event.crew | length }})</h2>
+    {% if event.crew %}
+    <table>
+      <thead><tr><th>Volunteer</th><th class="num">Tasks</th><th class="num">Done</th><th></th></tr></thead>
+      <tbody>
+        {% for m in event.crew %}
+        <tr>
+          <td>{{ m.full_name }} <span class="muted">· {{ m.role | label }}</span></td>
+          <td class="num">{{ m.tasks_total }}</td>
+          <td class="num">{{ m.tasks_done }}</td>
+          <td>{% if m.tasks_at_risk %}<span class="badge at_risk">{{ m.tasks_at_risk }} at risk</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Nobody has been given a task yet.</p>
+    {% endif %}
+  </section>
+</div>
+
+{% if organizer %}
+<div class="grid two">
+  {# ---- Event Autopilot ---- #}
+  <section class="card" aria-labelledby="readiness-title">
+    <h2 id="readiness-title">Event Autopilot · readiness</h2>
+    {% if readiness.applicable %}
+      <div class="score {{ readiness.band }}">
+        <span class="value">{{ readiness.score }}</span><span class="muted">/ 100</span>
+        <span class="badge {{ readiness.band }}">{{ readiness.band | label }}</span>
+      </div>
+      <p class="muted" style="margin: 6px 0 0">{{ readiness.summary }}</p>
+      {% if readiness.factors %}
+      <ul class="factors">
+        {% for f in readiness.factors %}
+        <li class="{{ f.severity }}">
+          <div class="head"><span>{{ f.title }}</span><span class="neg">−{{ f.points }}</span></div>
+          <div class="why">Why: {{ f.explanation }}</div>
+          <div class="next"><strong>Next:</strong> {{ f.action }}</div>
+          {% if f.evidence %}<ul class="evidence">{% for item in f.evidence %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      <p class="muted" style="font-size: 12px; margin: 12px 0 0">{{ readiness.method }}</p>
+    {% else %}
+      <p class="empty">{{ readiness.summary }}</p>
+    {% endif %}
+  </section>
+
+  {# ---- SyncSphere ---- #}
+  <section class="card" aria-labelledby="schedule-title">
+    <h2 id="schedule-title">SyncSphere · schedule check</h2>
+    {% if schedule.conflicts %}
+      <ul class="factors">
+        {% for c in schedule.conflicts %}
+        <li class="{{ 'high' if c.kind == 'venue' else 'medium' if c.kind == 'lead' else '' }}">
+          <div class="head">{% if c.other_visible %}<a href="/events/{{ c.other_event_id }}">{{ c.other_event_name }}</a>{% else %}<span>{{ c.other_event_name | capitalize }}</span>{% endif %}
+            <span class="badge {{ 'at_risk' if c.kind == 'venue' else 'needs_attention' if c.kind == 'lead' else '' }}">{{ {"venue": "Venue clash", "lead": "Lead clash", "time": "Time overlap"}[c.kind] }}</span></div>
+          <div class="why">{{ c.explanation }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if schedule.suggestions %}
+      <h2 style="margin-top: 16px">Alternative slots</h2>
+      <ul class="factors">
+        {% for s in schedule.suggestions %}
+        <li>
+          <div class="head"><span>{{ s.starts_at | ist }} – {{ s.ends_at | ist('%H:%M') }} IST</span>
+            {% if event.status in ("draft", "published") %}
+            <button class="small secondary" data-patch="/api/v1/events/{{ event.id }}"
+                    data-body='{"starts_at": "{{ s.starts_at.isoformat() }}", "ends_at": "{{ s.ends_at.isoformat() }}"}'>Move here</button>
+            {% endif %}</div>
+          <div class="why">{{ s.explanation }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      <p class="muted" style="font-size: 13px">{{ schedule.suggestion_note }}</p>
+    {% else %}
+      <p class="{{ 'empty' if not schedule.checked else '' }}">{{ schedule.message }}</p>
+    {% endif %}
+    <p class="muted" style="font-size: 12px; margin: 12px 0 0">{{ schedule.scope }}</p>
+  </section>
+</div>
+{% endif %}
+
+{# ---- CrewPulse ---- #}
+<section class="card" aria-labelledby="tasks-title">
+  <div class="actions" style="justify-content: space-between">
+    <h2 id="tasks-title">CrewPulse · volunteer tasks</h2>
+    {% set p = event.progress %}
+    {% if p.total %}
+    <div class="meta"><span>{{ p.done }}/{{ p.total }} done</span><span>{{ p.in_progress }} in progress</span>
+      <span>{{ p.blocked }} blocked</span>{% if p.at_risk %}<span class="badge at_risk">{{ p.at_risk }} at risk</span>{% endif %}</div>
+    {% endif %}
+  </div>
+  {% if p.total %}
+  <div class="progress" style="margin: 8px 0 14px" role="progressbar" aria-valuenow="{{ p.percent_done }}" aria-valuemin="0" aria-valuemax="100" aria-label="Tasks done">
+    <span style="width: {{ p.percent_done }}%"></span></div>
+  {% endif %}
+
+  {% if tasks %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Task</th><th>Owner</th><th>Due</th><th>Status</th>{% if organizer %}<th></th>{% endif %}</tr></thead>
+      <tbody>
+        {% for t in tasks %}
+        <tr class="{{ 'risk-row' if t.risks }}">
+          <td>
+            <strong>{{ t.title }}</strong>
+            {% if t.is_critical %}<span class="badge critical">Critical</span>{% endif %}
+            <span class="badge {{ t.priority }}">{{ t.priority | label }}</span>
+            {% for r in t.risks if r != "blocked" %}<span class="badge at_risk">{{ {"blocked": "Blocked", "overdue": "Overdue", "unassigned": "No owner", "critical_due_soon": "Critical, event soon"}[r] }}</span>{% endfor %}
+            {% if t.description %}<div class="muted" style="font-size: 13px">{{ t.description }}</div>{% endif %}
+            {% if t.blocker_note %}<div class="blocker">Blocker: {{ t.blocker_note }}</div>{% endif %}
+          </td>
+          <td>
+            {% if t.can_edit %}
+            <select data-assign="/api/v1/tasks/{{ t.id }}" aria-label="Owner of {{ t.title }}">
+              <option value="">Unassigned</option>
+              {% for person in people %}
+              <option value="{{ person.id }}" {% if t.assignee_id == person.id %}selected{% endif %}>{{ person.full_name }}</option>
+              {% endfor %}
+            </select>
+            {% else %}{{ t.assignee_name or "Unassigned" }}{% endif %}
+          </td>
+          <td class="nowrap">{{ t.due_at | ist('%d %b, %H:%M') }}</td>
+          <td><span class="badge {{ t.status }}">{{ t.status | label }}</span>
+            <div class="muted nowrap" style="font-size: 12px">{{ "Completed " ~ (t.completed_at | ist('%d %b, %H:%M')) if t.completed_at else "Updated " ~ (t.updated_at | ist('%d %b, %H:%M')) }}</div></td>
+          {% if organizer %}
+          <td class="nowrap">
+            {% if t.can_update_status %}
+              {% if t.status != "done" %}<button class="small success" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "done"}'>Done</button>{% endif %}
+              {% if t.status in ("done", "blocked") %}<button class="small secondary" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "in_progress"}'>Reopen</button>{% endif %}
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No tasks yet.{% if organizer and event.status in ("draft", "published") %} Add the first one below.{% endif %}</p>
+  {% endif %}
+
+  {% if organizer and event.status in ("draft", "published") %}
+  <details class="add-task" {% if not tasks %}open{% endif %}>
+    <summary>Add a task</summary>
+    <form class="stack" data-api="POST" action="/api/v1/events/{{ event.id }}/tasks">
+      <div class="fields">
+        <label>Task <input type="text" name="title" minlength="3" maxlength="120" required placeholder="e.g. Book the DJ"></label>
+        <label>Owner
+          <select name="assignee_id">
+            <option value="">Unassigned</option>
+            {% for person in people %}<option value="{{ person.id }}">{{ person.full_name }} ({{ person.role | label }})</option>{% endfor %}
+          </select>
+        </label>
+        <label>Due (IST) <input type="datetime-local" name="due_at"></label>
+        <label>Priority
+          <select name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
+        </label>
+      </div>
+      <label>Details <textarea name="description" maxlength="1000" placeholder="Optional"></textarea></label>
+      <label class="check"><input type="checkbox" name="is_critical"> Critical: the event cannot happen without this</label>
+      <div class="actions"><button type="submit">Add task</button></div>
+    </form>
+  </details>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/events.js"></script>{% endblock %}
