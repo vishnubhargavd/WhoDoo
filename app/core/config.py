@@ -1,7 +1,9 @@
 from decimal import Decimal
 from functools import lru_cache
+from typing import Literal
 from urllib.parse import urlsplit
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_JWT_SECRET = "dev-only-change-me"
@@ -16,11 +18,20 @@ class Settings(BaseSettings):
     db_null_pool: bool = False
     db_disable_statement_cache: bool = False
 
+    # local: tokens this app signs with JWT_SECRET (sub = users.id), plus the demo picker when
+    #        DEMO_AUTH=1 on a local database. For development and tests.
+    # supabase: Supabase Auth access tokens only, verified with ES256 against the project's
+    #        JWKS and mapped to a user through users.auth_user_id. See README_AUTH_BRIDGE.md.
+    auth_mode: Literal["local", "supabase"] = "local"
     demo_auth: bool = False
     jwt_secret: str = DEFAULT_JWT_SECRET
-    jwt_algorithm: str = "HS256"
+    jwt_algorithm: Literal["HS256"] = "HS256"
     session_cookie: str = "whodoo_session"
+    # No longer used. Kept as a field only so a leftover value stops the app (see check()).
     supabase_jwt_secret: str = ""
+    supabase_jwks_cache_seconds: int = Field(600, ge=60, le=3600)
+    supabase_jwks_timeout_seconds: float = Field(5.0, ge=1.0, le=10.0)
+    supabase_jwt_leeway_seconds: int = Field(30, ge=0, le=60)
 
     supabase_url: str = ""
     supabase_service_key: str = ""
@@ -58,7 +69,16 @@ class Settings(BaseSettings):
 
     @property
     def token_secret(self) -> str:
-        return self.supabase_jwt_secret or self.jwt_secret
+        """The secret for locally issued (AUTH_MODE=local) tokens. Never the Supabase secret."""
+        return self.jwt_secret
+
+    @property
+    def supabase_auth_issuer(self) -> str:
+        return self.supabase_url.strip().rstrip("/") + "/auth/v1"
+
+    @property
+    def supabase_jwks_url(self) -> str:
+        return self.supabase_auth_issuer + "/.well-known/jwks.json"
 
     @property
     def use_stripe(self) -> bool:
@@ -68,14 +88,41 @@ class Settings(BaseSettings):
         return key.startswith(("sk_test_", "rk_test_")) and "REPLACE" not in key
 
     def check(self) -> None:
-        if not self.demo_auth and self.token_secret == DEFAULT_JWT_SECRET:
+        if self.supabase_jwt_secret:
             raise RuntimeError(
-                "JWT_SECRET (or SUPABASE_JWT_SECRET) must be set when DEMO_AUTH is off"
+                "SUPABASE_JWT_SECRET is not used and must be removed: Supabase tokens are verified with "
+                "ES256 public keys from the project's JWKS (AUTH_MODE=supabase), never with a shared secret"
             )
+        if self.auth_mode == "supabase":
+            self._check_supabase_auth()
+        elif not self.demo_auth and (self.jwt_secret == DEFAULT_JWT_SECRET or len(self.jwt_secret) < 32):
+            raise RuntimeError("JWT_SECRET must be set to at least 32 characters when DEMO_AUTH is off")
         if self.fairseat_enabled and self.demo_auth and not self.database_is_local:
             raise RuntimeError(
                 "FAIRSEAT_ENABLED cannot be combined with DEMO_AUTH on a database that is not local: "
                 "demo sign-in lets anyone book as anyone"
+            )
+        if self.demo_auth and not self.database_is_local:
+            raise RuntimeError(
+                "DEMO_AUTH cannot be used with a database that is not local: demo sign-in lets anyone act as anyone"
+            )
+
+    def _check_supabase_auth(self) -> None:
+        if self.demo_auth:
+            raise RuntimeError("DEMO_AUTH cannot be combined with AUTH_MODE=supabase")
+        parts = urlsplit(self.supabase_url.strip())
+        loopback = parts.hostname in ("localhost", "127.0.0.1", "::1")  # the Supabase CLI's local stack
+        if (
+            not parts.hostname
+            or not (parts.scheme == "https" or (parts.scheme == "http" and loopback))
+            or parts.username
+            or parts.password
+            or parts.path not in ("", "/")
+            or parts.query
+            or parts.fragment
+        ):
+            raise RuntimeError(
+                "AUTH_MODE=supabase needs SUPABASE_URL set to the project URL, e.g. https://<ref>.supabase.co"
             )
 
 

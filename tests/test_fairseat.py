@@ -873,7 +873,8 @@ def test_demo_sign_in_cannot_be_combined_with_booking_on_a_shared_database():
     remote = "postgresql+asyncpg://user:secret@db.example.supabase.co:5432/postgres"
     with pytest.raises(RuntimeError, match="FAIRSEAT_ENABLED"):
         Settings(database_url=remote, demo_auth=True, fairseat_enabled=True, jwt_secret="x" * 40).check()
-    Settings(database_url=remote, demo_auth=True, fairseat_enabled=False, jwt_secret="x" * 40).check()
+    with pytest.raises(RuntimeError, match="DEMO_AUTH"):  # demo sign-in needs a local database anyway
+        Settings(database_url=remote, demo_auth=True, fairseat_enabled=False, jwt_secret="x" * 40).check()
     Settings(database_url=remote, demo_auth=False, fairseat_enabled=True, jwt_secret="x" * 40).check()
     Settings(database_url="postgresql+asyncpg://localhost/whodoo", demo_auth=True, fairseat_enabled=True).check()
     assert Settings().fairseat_enabled is True  # set by the test environment; the shipped default is off
