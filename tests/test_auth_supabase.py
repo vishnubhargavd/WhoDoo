@@ -467,7 +467,8 @@ def code(response) -> str:
 
 async def test_linked_user_signs_in_with_a_supabase_token(client, world, db, supabase_mode, identity_column):
     auth_id = await link(db, world.president)
-    response = await client.get("/api/v1/events", headers=supabase_mode(auth_id))
+    # scope=all: the fixture's events have fixed dates, which the default "upcoming" drops once past.
+    response = await client.get("/api/v1/events?scope=all", headers=supabase_mode(auth_id))
     assert response.status_code == 200
     assert {e["name"] for e in response.json()} == {"Bake Sale", "Tech Fest"}
     response = await client.get("/api/v1/ledger/summary", headers=supabase_mode(auth_id))
@@ -489,8 +490,10 @@ async def test_role_and_club_come_from_the_database_not_the_token(client, world,
     other = Club(id=uuid.uuid4(), name="Other Club")
     db.add(other)
     await db.flush()
-    other_event = Event(id=uuid.uuid4(), club_id=other.id, name="Other Gala")
+    # Published on both sides: a plain member never sees drafts, so only the club decides what is listed.
+    other_event = Event(id=uuid.uuid4(), club_id=other.id, name="Other Gala", status="published")
     db.add(other_event)
+    await db.execute(text("UPDATE events SET status = 'published' WHERE club_id = :c"), {"c": world.club.id})
     await db.commit()
     auth_id = await link(db, world.member)
     claims = {
@@ -503,7 +506,7 @@ async def test_role_and_club_come_from_the_database_not_the_token(client, world,
 
     response = await client.get("/api/v1/ledger/summary", headers=headers)
     assert (response.status_code, code(response)) == (403, "forbidden")  # still a plain member
-    response = await client.get("/api/v1/events", headers=headers)
+    response = await client.get("/api/v1/events?scope=all", headers=headers)
     assert response.status_code == 200 and {e["club_id"] for e in response.json()} == {str(world.club.id)}
     response = await client.get(f"/api/v1/events/{other_event.id}", headers=headers)
     assert response.status_code == 404  # the other club stays invisible
