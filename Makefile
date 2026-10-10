@@ -7,7 +7,7 @@ PORT    ?= 8000
 PG_BIN  ?= $(shell brew --prefix postgresql@16 2>/dev/null)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install env db-start db-stop db-create migrate seed run test test-ledger test-expenses test-ocr test-merch test-pages receipts psql clean
+.PHONY: help setup install env db-start db-stop db-create migrate seed run test test-ledger test-expenses test-approvals test-ocr test-merch test-pages receipts psql clean
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -63,6 +63,9 @@ test-ledger: install ## Run only the TrustLedger tests
 
 test-expenses: install ## Run only the Snap-to-Reimburse tests
 	$(PY) -m pytest -q tests/test_expenses.py
+
+test-approvals: install ## Run only the approval policy tests (two-person rule)
+	$(PY) -m pytest -q tests/test_approval_policy.py
 
 test-ocr: install ## Run only the receipt reading (OCR) tests
 	$(PY) -m pytest -q tests/test_receipt_ocr.py

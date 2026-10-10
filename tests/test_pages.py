@@ -148,7 +148,7 @@ async def test_claim_page_shows_receipt_items_total_and_progress(client, world, 
     for path in ("/expenses", f"/expenses/{large['id']}"):
         text = (await client.get(path)).text
         assert "First approval done" in text
-        assert "Approved by event lead · awaiting final approval from Tara Treasurer" in text
+        assert "First approval by Lina Lead · awaiting final approval from Tara Treasurer" in text
     assert "Edited by submitter" in (await client.get(f"/expenses/{large['id']}")).text
 
 

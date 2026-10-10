@@ -18,17 +18,22 @@
 {% set approved = claim.status in ("approved", "paid") %}
 <ol class="steps">
   <li class="done"><strong>1. Submitted</strong>{{ claim.submitted_by_name }}</li>
-  {% if claim.needs_final_approval %}
-    <li class="{{ 'done' if first_done else 'current' }}"><strong>2. Event lead approval</strong>
-      {{ "Done" if first_done else "Waiting for " ~ (claim.current_approver_name or "an approver") }}</li>
+  {% if claim.needs_final_approval or claim.approval_stage == "final" %}
+    <li class="{{ 'done' if first_done else 'current' }}"><strong>2. First approval</strong>
+      {{ "Approved by " ~ (claim.first_approved_by_name or "an approver") if first_done
+         else "Waiting for " ~ (claim.current_approver_name or "an approver") }}</li>
     <li class="{{ 'done' if approved else 'current' if first_done else '' }}"><strong>3. Final approval</strong>
-      {{ "Done" if approved else ("Waiting for " ~ (claim.current_approver_name or "the treasurer")) if first_done else "Treasurer or president" }}</li>
+      {% if approved %}Approved by {{ claim.final_approver_name or "an approver" }}
+      {% elif first_done %}Waiting for {{ claim.current_approver_name or "the treasurer" }}, or another treasurer or
+        president other than {{ claim.first_approved_by_name }}
+      {% else %}A treasurer or president who did not give the first approval{% endif %}</li>
   {% else %}
     <li class="{{ 'done' if approved else 'current' }}"><strong>2. Approval</strong>
-      {{ "Done" if approved else "Waiting for " ~ (claim.current_approver_name or "an approver") }}</li>
+      {{ "Approved by " ~ (claim.final_approver_name or "an approver") if approved
+         else "Waiting for " ~ (claim.current_approver_name or "an approver") }}</li>
   {% endif %}
   <li class="{{ 'done' if claim.status == 'paid' else 'current' if approved else '' }}">
-    <strong>{{ "4" if claim.needs_final_approval else "3" }}. Payment</strong>
+    <strong>{{ "4" if claim.needs_final_approval or claim.approval_stage == "final" else "3" }}. Payment</strong>
     {{ "Paid to " ~ claim.submitted_by_name if claim.status == "paid" else "Waiting for the treasurer to pay" if approved else "After approval" }}</li>
 </ol>
 {% endif %}
@@ -36,12 +41,17 @@
 <div class="notice {{ 'ok' if claim.status in ('approved', 'paid') else 'error' if claim.status == 'rejected' else 'info' }}">
   <strong>{{ claim.status_label }}.</strong>
   {% if claim.status == "pending_approval" and claim.needs_final_approval %}
-    Claims of {{ approval_limit | inr }} or more need the event lead first, then the treasurer or president.
+    Claims of {{ approval_limit | inr }} or more need two different approvers: a first approval, then a final
+    approval from a treasurer or president who did not give the first.
   {% elif claim.status == "rejected" %}Reason: {{ claim.rejection_reason }}
   {% elif claim.status == "approved" %}The reimbursement is in the ledger and will reduce the club balance once it is marked as paid.
   {% elif claim.status == "paid" %}The ledger balance reflects this reimbursement.
   {% endif %}
 </div>
+
+{% if claim.approval_blocked_reason and user.id != claim.submitted_by %}
+<div class="notice info"><strong>You cannot approve this claim.</strong> {{ claim.approval_blocked_reason }}.</div>
+{% endif %}
 
 <div class="grid two">
   <div class="card">

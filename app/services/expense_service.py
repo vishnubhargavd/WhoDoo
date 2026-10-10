@@ -4,9 +4,10 @@ Approval rules (limit = EXPENSE_AUTO_APPROVAL_LIMIT, default ₹1,000):
 
 * Below the limit, one approval is enough: the event lead's, or a treasurer's or
   president's standing in for them.
-* At or above the limit, the event lead's approval is only the first step; the claim
-  then needs a treasurer or president. A treasurer's or president's approval is
-  always final, so they can approve a large claim directly.
+* At or above the limit, two DIFFERENT people must approve. The first approval comes
+  from the event lead (or a treasurer or president standing in). The final approval
+  comes from a treasurer or president who did not give the first one. A treasurer who
+  approves first has not also given the final approval.
 * Nobody approves, rejects or pays out their own claim.
 * The ledger entry is written exactly once, on final approval, and only moves
   the balance when the claim is marked paid.
@@ -161,30 +162,41 @@ async def _locked(session: AsyncSession, user: CurrentUser, claim_id: uuid.UUID)
     return claim
 
 
-def _why_cannot_decide(claim: ExpenseClaim, user: CurrentUser) -> AppError | None:
-    """Return the reason this user may not approve, reject or send back the claim, or None if they may."""
+def _why_cannot_decide(claim: ExpenseClaim, user: CurrentUser, *, approving: bool = True) -> AppError | None:
+    """Return the reason this user may not act on the claim, or None if they may.
+
+    `approving=False` is for rejecting or sending back: the same people may do it, but the
+    two-person rule does not apply (the first approver can still stop a claim they approved).
+    Everything is read from the locked database row, never from the request.
+    """
     if claim.status != "pending_approval":
         return conflict("not_pending", f"This claim is already {claim.status.replace('_', ' ')}")
     if user.id == claim.submitted_by:
         return AppError(403, "self_approval", "You cannot decide on your own claim")
-    if user.role in FINANCE_ADMINS:
-        return None  # the treasurer and president can decide any claim but their own, at either stage
-    if claim.approval_stage == "final":
-        if user.id == claim.first_approved_by:
-            return AppError(
-                403, "awaiting_final_approval",
-                "You have already approved this claim. It is now waiting for the treasurer or president",
-            )
+    is_admin = user.role in FINANCE_ADMINS
+
+    if claim.approval_stage == "first":
+        if is_admin or user.id == claim.current_approver_id:
+            return None
+        return forbidden("This claim is waiting for a different approver")
+
+    # Final stage: a treasurer or president, and not the person who gave the first approval.
+    if approving and user.id == claim.first_approved_by:
+        return conflict(
+            "duplicate_approval",
+            "You gave the first approval on this claim. A different treasurer or president must give the final one",
+        )
+    if not is_admin:
         return forbidden("Final approval needs the treasurer or president")
-    if user.id == claim.current_approver_id:
-        return None
-    return forbidden("This claim is waiting for a different approver")
+    return None
 
 
 def allowed_actions(claim: ExpenseClaim, user: CurrentUser) -> list[str]:
     actions: list[str] = []
     if _why_cannot_decide(claim, user) is None:
-        actions += ["approve", "reject", "request_changes"]
+        actions.append("approve")
+    if _why_cannot_decide(claim, user, approving=False) is None:
+        actions += ["reject", "request_changes"]
     if claim.status == "approved" and user.role in FINANCE_ADMINS and user.id != claim.submitted_by:
         actions.append("mark_paid")
     if claim.status == "change_requested" and user.id == claim.submitted_by:
@@ -192,12 +204,22 @@ def allowed_actions(claim: ExpenseClaim, user: CurrentUser) -> list[str]:
     return actions
 
 
-def status_label(claim: ExpenseClaim, waiting_on: str | None) -> str:
+def approval_blocked_reason(claim: ExpenseClaim, user: CurrentUser) -> str | None:
+    """Why an approver cannot approve a claim that is still pending, in words for the page. None if they can."""
+    if claim.status != "pending_approval" or user.role not in APPROVERS:
+        return None
+    error = _why_cannot_decide(claim, user)
+    return error.message if error else None
+
+
+def status_label(claim: ExpenseClaim, waiting_on: str | None, first_approver: str | None = None) -> str:
     """Say where a claim stands in plain words, so a first approval never looks like "nothing happened"."""
     who = waiting_on or "the treasurer"
     if claim.status == "pending_approval":
         if claim.approval_stage == "final":
-            return f"Approved by event lead · awaiting final approval from {who}"
+            return f"First approval by {first_approver or 'an approver'} · awaiting final approval from {who}"
+        if needs_final_approval(claim.amount):
+            return f"Awaiting first approval from {who}"
         return f"Awaiting approval from {who}"
     return {
         "approved": "Approved · awaiting payment",
@@ -278,18 +300,23 @@ async def approve_claim(
     if error := _why_cannot_decide(claim, user):
         raise error
 
-    # An event lead's approval of a large claim is only the first of two. A treasurer's or
-    # president's approval is always final, whichever stage the claim is at.
-    if user.role not in FINANCE_ADMINS and needs_final_approval(claim.amount):
-        final_approver = await _finance_admin(session, claim.club_id, exclude={claim.submitted_by})
+    # At or above the limit the first approval, whoever gives it, only moves the claim to the
+    # final stage. This holds for a treasurer or president too: approving first is not approving twice.
+    if claim.approval_stage == "first" and needs_final_approval(claim.amount):
+        final_approver = await _finance_admin(session, claim.club_id, exclude={claim.submitted_by, user.id})
         if final_approver is None:
-            raise conflict("no_final_approver", "Nobody is available to give final approval")
+            raise conflict("no_final_approver", "Nobody else is available to give the final approval")
         claim.first_approved_by = user.id
         claim.approval_stage = "final"
         claim.current_approver_id = final_approver
         _log(session, claim, user, "approved", comment or "First approval. Final approval required.")
         await session.flush()
         return claim
+
+    # Last line of defence before money is committed: a claim at the final stage must have a
+    # recorded first approver who is someone else. _why_cannot_decide already enforces this.
+    if claim.approval_stage == "final" and claim.first_approved_by in (None, user.id):
+        raise conflict("duplicate_approval", "Final approval must come from a different person than the first")
 
     claim.status = "approved"
     claim.final_approver_id = user.id
@@ -319,7 +346,7 @@ async def approve_claim(
 
 async def reject_claim(session: AsyncSession, user: CurrentUser, claim_id: uuid.UUID, reason: str) -> ExpenseClaim:
     claim = await _locked(session, user, claim_id)
-    if error := _why_cannot_decide(claim, user):
+    if error := _why_cannot_decide(claim, user, approving=False):
         raise error
     claim.status = "rejected"
     claim.rejection_reason = reason
@@ -331,7 +358,7 @@ async def reject_claim(session: AsyncSession, user: CurrentUser, claim_id: uuid.
 
 async def request_changes(session: AsyncSession, user: CurrentUser, claim_id: uuid.UUID, comment: str) -> ExpenseClaim:
     claim = await _locked(session, user, claim_id)
-    if error := _why_cannot_decide(claim, user):
+    if error := _why_cannot_decide(claim, user, approving=False):
         raise error
     claim.status = "change_requested"
     claim.current_approver_id = None
@@ -390,7 +417,10 @@ def _extras(claim: ExpenseClaim, user: CurrentUser, people: dict, events: dict) 
         "event_name": events.get(claim.event_id),
         "needs_final_approval": needs_final_approval(claim.amount),
         "allowed_actions": allowed_actions(claim, user),
-        "status_label": status_label(claim, name(claim.current_approver_id)),
+        "status_label": status_label(claim, name(claim.current_approver_id), name(claim.first_approved_by)),
+        "first_approved_by_name": name(claim.first_approved_by),
+        "final_approver_name": name(claim.final_approver_id),
+        "approval_blocked_reason": approval_blocked_reason(claim, user),
         "amount_edited": claim.extracted_amount is not None and claim.extracted_amount != claim.amount,
     }
 
@@ -411,7 +441,9 @@ class _ClaimView:
 async def present(session: AsyncSession, user: CurrentUser, claims: list[ExpenseClaim]) -> list[ExpenseClaimOut]:
     """Turn claims into API objects, adding people's and events' names and the caller's allowed actions."""
     people = await shared_directory.get_users(
-        session, [uid for claim in claims for uid in (claim.submitted_by, claim.current_approver_id)]
+        session,
+        [uid for claim in claims
+         for uid in (claim.submitted_by, claim.current_approver_id, claim.first_approved_by, claim.final_approver_id)],
     )
     events = {event.id: event.name for event in await shared_directory.list_events(session, user.club_id)}
     return [
@@ -429,12 +461,15 @@ async def list_my_claims(session: AsyncSession, user: CurrentUser, status: str |
 
 
 async def get_queue(session: AsyncSession, user: CurrentUser) -> ApprovalQueue:
-    pending = await session.scalars(
+    pending = list(await session.scalars(
         select(ExpenseClaim)
         .where(C.club_id == user.club_id, C.status == "pending_approval")
         .order_by(C.created_at)
-    )
+    ))
     to_approve = [claim for claim in pending if _why_cannot_decide(claim, user) is None]
+    awaiting_others = [
+        claim for claim in pending if claim.approval_stage == "final" and claim.first_approved_by == user.id
+    ]
 
     to_pay: list[ExpenseClaim] = []
     if user.role in FINANCE_ADMINS:
@@ -445,7 +480,9 @@ async def get_queue(session: AsyncSession, user: CurrentUser) -> ApprovalQueue:
         )
         to_pay = list(approved)
     return ApprovalQueue(
-        to_approve=await present(session, user, to_approve), to_pay=await present(session, user, to_pay)
+        to_approve=await present(session, user, to_approve),
+        awaiting_others=await present(session, user, awaiting_others),
+        to_pay=await present(session, user, to_pay),
     )
 
 
@@ -462,7 +499,9 @@ async def get_claim_detail(session: AsyncSession, user: CurrentUser, claim_id: u
         )
     )
     people = await shared_directory.get_users(
-        session, [claim.submitted_by, claim.current_approver_id, *(log.approver_id for log in logs)]
+        session,
+        [claim.submitted_by, claim.current_approver_id, claim.first_approved_by, claim.final_approver_id,
+         *(log.approver_id for log in logs)],
     )
     events = {event.id: event.name for event in await shared_directory.list_events(session, user.club_id)}
     entry = await ledger_service.get_entry_for_reference(

@@ -142,7 +142,13 @@ class ExpenseClaimOut(ORMModel):
     needs_final_approval: bool = Field(description="True when the amount is at or above the approval limit")
     current_approver_id: uuid.UUID | None
     current_approver_name: str | None = None
+    first_approved_by: uuid.UUID | None = Field(description="Who gave the first of two approvals, if any")
+    first_approved_by_name: str | None = None
     final_approver_id: uuid.UUID | None
+    final_approver_name: str | None = None
+    approval_blocked_reason: str | None = Field(
+        default=None, description="For approvers: why the caller cannot approve this pending claim, if they cannot"
+    )
     rejection_reason: str | None
     allowed_actions: list[ClaimAction] = Field(description="What the caller may do to this claim right now")
     status_label: str = Field(description="Plain-language status, including who the claim is waiting on")
@@ -160,4 +166,7 @@ class ExpenseClaimDetail(ExpenseClaimOut):
 
 class ApprovalQueue(BaseModel):
     to_approve: list[ExpenseClaimOut]
+    awaiting_others: list[ExpenseClaimOut] = Field(
+        default=[], description="Claims the caller gave the first approval on, now waiting for a different approver"
+    )
     to_pay: list[ExpenseClaimOut] = Field(description="Approved claims waiting to be paid (treasurer and president)")

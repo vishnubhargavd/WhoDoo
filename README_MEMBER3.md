@@ -26,8 +26,8 @@ Everyday commands (run `make help` for the full list):
 | Command | What it does |
 |---|---|
 | `make run` | Start the app with auto-reload (`make run PORT=8080` to change the port) |
-| `make test` | Run all 64 tests against the `whodoo_test` database |
-| `make test-ledger`, `test-expenses`, `test-merch` | Run one module's tests |
+| `make test` | Run all 84 tests against the `whodoo_test` database |
+| `make test-ledger`, `test-expenses`, `test-approvals`, `test-ocr`, `test-merch`, `test-pages` | Run one area's tests |
 | `make seed` | Wipe the local database and load fresh demo data |
 | `make migrate` | Apply pending SQL migrations |
 | `make db-start`, `make db-stop` | Start or stop the local Postgres service |
@@ -147,17 +147,22 @@ How totals are worked out:
 ```
 submit ──► pending_approval (first) ──approve──► approved ──mark-paid──► paid
                   │   amount ≥ limit                ▲
-                  └──approve──► pending_approval (final) ──approve──┘
+                  └──approve──► pending_approval (final) ──approve by a DIFFERENT treasurer/president──┘
            reject ──► rejected        request-changes ──► change_requested ──resubmit──► back to first
 ```
 
 - **Below ₹1,000:** one approval, from the event's lead. The treasurer or president can step in.
-- **₹1,000 or more:** the event lead's approval is only the first step; the claim then needs the treasurer or president.
-- **A treasurer's or president's approval is always final,** at either stage, so they can approve a large claim directly.
-- **The submitter always sees where the claim stands.** Every claim carries a `status_label`, e.g. "Approved by event lead · awaiting final approval from Rohan Mehta", and the claim page shows the steps. Open pages refresh themselves within about five seconds of a change.
+- **₹1,000 or more:** two approvals from **two different people**.
+  - First approval: the event's lead, or a treasurer or president standing in.
+  - Final approval: a treasurer or president **who did not give the first approval**.
+  - A treasurer or president who approves first has not also given the final approval. A second attempt by the same person gets `409 duplicate_approval`.
+- **The submitter always sees where the claim stands.** Every claim carries a `status_label`, e.g. "First approval by Karthik Nair · awaiting final approval from Rohan Mehta", and the claim page shows each step with the approver's name. Open pages refresh themselves within about five seconds of a change.
+- **Approvers see why they cannot act.** `approval_blocked_reason` explains it, and the approvals page lists claims they first-approved under "You gave the first approval".
+- **The first approver can still reject or send back** a claim they approved; only approving twice is blocked.
 - **First approver:** the linked event's lead. With no event, or when the lead is the submitter, it goes to the treasurer, then the president.
 - **Nobody decides on or pays out their own claim.** This applies to the treasurer too.
-- **Final approval** writes exactly one ledger entry: `reimbursement`, `debit`, `approved`.
+- **Final approval** writes exactly one ledger entry: `reimbursement`, `debit`, `approved`. Nothing is posted after only a first approval, and a claim cannot be marked paid until it is fully approved.
+- **The rule is enforced in the service**, on the row-locked claim, from the stored amount and stored approver ids. Nothing about approvers is accepted from the request.
 - **Mark paid** moves that entry to `paid`, which is when the balance drops.
 - Every action is written to `approval_logs`. Claims are row-locked while being decided, so a second approval gets `409`.
 
@@ -243,7 +248,7 @@ After seeding, the balance is ₹15,140.00 and the Hoodie in M has 10 in stock.
 8. As the treasurer, the **Ledger** shows the merchandise income entry for that order.
 9. **Dashboard**: balance ₹15,089.00, with Bake Sale in the event profit and loss table.
 
-For two-level approval, submit the ₹2,500 sample receipt against **Tech Fest Workshop**: Karthik Nair (lead) approves first, and the volunteer's page shows "Approved by event lead · awaiting final approval". Then Rohan Mehta or Ananya Rao gives final approval.
+For two-level approval, submit the ₹2,500 sample receipt against **Tech Fest Workshop**: Karthik Nair (lead) approves first, and the volunteer's page shows "First approval by Karthik Nair · awaiting final approval from Rohan Mehta". Then Rohan Mehta or Ananya Rao gives final approval. To show the control, have Rohan approve first instead: he then has no approve button, and Ananya must give the final approval.
 
 For a multi-item receipt, use the third sample on the submit page (six items, tax lines, total ₹968.00).
 
@@ -284,6 +289,8 @@ await ledger_service.record_income(
 - **PDF receipts are stored but not read by OCR.** The fields must be typed in.
 - **OCR rules are tuned for printed English receipts.** Handwritten, crumpled or badly lit receipts will need manual entry, and individual item lines can still be misread on small images.
 - **The store page orders one product variant at a time.** The API (`POST /merch/orders`) and every order page handle several items per order; there is no cart in the review UI.
+- **An officer's own large claim needs a third person.** With one treasurer and one president, a ₹1,000+ claim submitted by either of them can only be approved if it is linked to an event whose lead gives the first approval. Otherwise the first approval is refused with `no_final_approver`.
+- **Claims approved before the two-person rule are not rewritten.** To list any large claim that reached approval with a single approver: `SELECT id, title, amount, status FROM expense_claims WHERE status IN ('approved','paid') AND first_approved_by IS NULL AND amount >= 1000;`
 - **Approve, reject and pay buttons use the browser's own confirm and prompt boxes.**
 - **Refunds call the provider before the database commit.** If the commit then failed, a refund could be issued without being recorded.
 - **Stock is not reserved at order time,** so a buyer can reach payment for an item that sells out first. They are refunded automatically.

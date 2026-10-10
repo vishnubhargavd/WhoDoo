@@ -192,7 +192,7 @@ async def test_large_claim_needs_a_second_approver(client, db, world, auth, subm
 
     # The event lead cannot also give the final approval.
     again = await client.post(f"{url}/approve", headers=auth(world.lead2))
-    assert again.status_code == 403
+    assert again.status_code == 409
 
     final = await client.post(f"{url}/approve", headers=auth(world.treasurer), json={"comment": "Within budget"})
     assert final.status_code == 200
@@ -207,34 +207,19 @@ async def test_large_claim_needs_a_second_approver(client, db, world, auth, subm
     assert just_under["needs_final_approval"] is False
 
 
-async def test_treasurer_or_president_approval_is_always_final(client, db, world, auth, submit):
-    # A large claim the treasurer approves directly is approved: no second step, nothing left "pending".
-    claim = await submit(world.volunteer, amount="2500.00", event=world.fest)
-    direct = await client.post(f"{API}/{claim['id']}/approve", headers=auth(world.treasurer))
-    assert direct.status_code == 200
-    assert (direct.json()["status"], direct.json()["status_label"]) == ("approved", "Approved · awaiting payment")
-    assert len(await _ledger_entries(db, claim["id"])) == 1
-
-    # A large claim with no event goes straight to the treasurer, whose approval is final too.
-    no_event = await submit(world.volunteer, amount="1500.00")
-    assert no_event["current_approver_id"] == str(world.treasurer.id)
-    approved = await client.post(f"{API}/{no_event['id']}/approve", headers=auth(world.president))
-    assert approved.json()["status"] == "approved"
-
-
 async def test_submitter_sees_each_approval_step(client, world, auth, submit):
     """The reported bug: after the event lead approved a large claim, the member's view still just
     said "pending", as if nothing had happened."""
     claim = await submit(world.volunteer, amount="1800.00", event=world.fest)
     url = f"{API}/{claim['id']}"
-    assert claim["status_label"] == "Awaiting approval from Lina Lead"
+    assert claim["status_label"] == "Awaiting first approval from Lina Lead"
 
     first = await client.post(f"{url}/approve", headers=auth(world.lead2))
-    assert first.json()["status_label"] == "Approved by event lead · awaiting final approval from Tara Treasurer"
+    assert first.json()["status_label"] == "First approval by Lina Lead · awaiting final approval from Tara Treasurer"
 
     # What the member sees, in the list and on the claim.
     [mine] = (await client.get(API, headers=auth(world.volunteer))).json()
-    assert mine["status_label"] == "Approved by event lead · awaiting final approval from Tara Treasurer"
+    assert mine["status_label"] == "First approval by Lina Lead · awaiting final approval from Tara Treasurer"
     assert (mine["status"], mine["approval_stage"]) == ("pending_approval", "final")
     history = (await client.get(url, headers=auth(world.volunteer))).json()["approval_history"]
     assert [(log["action"], log["approver_name"]) for log in history] == [
@@ -243,7 +228,7 @@ async def test_submitter_sees_each_approval_step(client, world, auth, submit):
 
     # The lead is told why they cannot approve again; the treasurer sees it in their queue.
     again = await client.post(f"{url}/approve", headers=auth(world.lead2))
-    assert again.status_code == 403 and again.json()["error"]["code"] == "awaiting_final_approval"
+    assert again.status_code == 409 and again.json()["error"]["code"] == "duplicate_approval"
     queue = (await client.get(f"{API}/approvals", headers=auth(world.treasurer))).json()["to_approve"]
     assert [item["id"] for item in queue] == [claim["id"]]
 
