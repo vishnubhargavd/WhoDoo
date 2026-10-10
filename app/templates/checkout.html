@@ -12,7 +12,7 @@
   You pay on Stripe's own page with a test card: <span class="nowrap">4242 4242 4242 4242</span>, any future expiry, any CVC. No real money moves.</div>
 {% endif %}
 {% if cancelled and order.status == "created" %}
-<div class="notice">Payment was not completed. Nothing was charged; you can try again below.</div>
+<div class="notice info">Payment was not completed. Nothing was charged; you can try again below.</div>
 {% endif %}
 {% if order.payment_status == "failed" and order.status == "created" %}
 <div class="notice error">The last payment attempt was declined. You can try again.</div>
