@@ -40,7 +40,11 @@ _AUTH_IDENTITY_COLUMN = text(
            EXISTS (
                SELECT 1 FROM pg_index i
                WHERE i.indrelid = a.attrelid AND i.indisunique AND i.indnkeyatts = 1
-                 AND i.indkey[0] = a.attnum AND i.indpred IS NULL
+                 AND i.indkey[0] = a.attnum
+                 -- Migration 030 indexes only the rows that have a value. NULLs never collide
+                 -- anyway, so that is the same guarantee as an index over every row.
+                 AND (i.indpred IS NULL
+                      OR pg_get_expr(i.indpred, i.indrelid) = '(auth_user_id IS NOT NULL)')
            ) AS is_unique
     FROM pg_attribute a
     WHERE a.attrelid = to_regclass('users') AND a.attname = 'auth_user_id' AND NOT a.attisdropped

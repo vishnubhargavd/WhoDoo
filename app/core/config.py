@@ -60,8 +60,11 @@ class Settings(BaseSettings):
     fairseat_max_per_purchaser: int = 6
     # Ticket payments are a second switch, also off by default.
     fairseat_payments_enabled: bool = False
-    # Where the payment provider sends a ticket buyer back to. Blank = this API's own return route.
+    # Where the payment provider sends a ticket buyer back to. Blank = this app's /tickets/return page.
     fairseat_return_url: str = ""
+    # Signs the QR code on each ticket. Blank = JWT_SECRET, which is only acceptable when this
+    # app signs its own sign-in tokens with a real one (see check()).
+    ticket_credential_secret: str = ""
 
     @property
     def database_is_local(self) -> bool:
@@ -102,6 +105,13 @@ class Settings(BaseSettings):
                 "FAIRSEAT_ENABLED cannot be combined with DEMO_AUTH on a database that is not local: "
                 "demo sign-in lets anyone book as anyone"
             )
+        if self.fairseat_enabled and not self.demo_auth:
+            secret = self.ticket_credential_secret or self.jwt_secret
+            if secret == DEFAULT_JWT_SECRET or len(secret) < 32:
+                raise RuntimeError(
+                    "TICKET_CREDENTIAL_SECRET must be set to at least 32 characters when FAIRSEAT_ENABLED is on: "
+                    "it signs the QR code on every ticket"
+                )
         if self.demo_auth and not self.database_is_local:
             raise RuntimeError(
                 "DEMO_AUTH cannot be used with a database that is not local: demo sign-in lets anyone act as anyone"

@@ -56,6 +56,7 @@ from app.services import (
     audit_service,
     event_service,
     fairseat_pricing,
+    gatesync_service,
     ticket_inventory,
     ticket_locks,
     ticket_service,
@@ -455,6 +456,8 @@ async def reserve(
         request_fingerprint=fingerprint, booking_id=booking.id,
     ))
     await session.flush()
+    if free:
+        await gatesync_service.issue_for_booking(session, booking, now)
     audit_service.record(
         session, club_id=event.club_id, actor_id=user.id, action="fairseat.booking_created",
         entity_type="ticket_booking", entity_id=booking.id,

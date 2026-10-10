@@ -41,7 +41,7 @@ from app.models.fairseat import TicketBooking, TicketCategory, TicketPaymentEven
 from app.models.shared import Event
 from app.models.tickets import EventTicketSettings
 from app.schemas.fairseat import BookingOut, TicketCheckoutOut, TicketPaymentOut, TicketWebhookAck
-from app.services import audit_service, fairseat_service, ledger_service, payment_service, ticket_locks
+from app.services import audit_service, fairseat_service, gatesync_service, ledger_service, payment_service, ticket_locks
 from app.services.payment_service import CheckoutLine, CheckoutRequest, InvalidWebhookSignature, RefundResult
 
 B = TicketBooking
@@ -143,7 +143,7 @@ async def create_checkout_session(
         raise conflict("payment_received", "A payment for this booking has been received and is being confirmed.")
     if current is None or current.status != "open":
         base = settings.app_base_url.rstrip("/")
-        back = settings.fairseat_return_url or f"{base}/api/v1/ticket-payments/stripe/return"
+        back = settings.fairseat_return_url or f"{base}/tickets/return"
         request = CheckoutRequest(
             amount_paise=booking.total_price_paise,
             currency=booking.currency.lower(),
@@ -263,9 +263,9 @@ async def record_payment(
         booking.refund_reason = reason
     await session.flush()
     if reason is None:
-        # Entitlements only. They carry no credential and admit nobody until GateSync issues one.
         session.add_all(fairseat_service._new_tickets(booking))
         await session.flush()
+        await gatesync_service.issue_for_booking(session, booking, now)
 
     # The money did arrive, so the ledger says so, exactly once per payment.
     await ledger_service.record_income(
