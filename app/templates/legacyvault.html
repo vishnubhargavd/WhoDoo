@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Leadership Continuity · LegacyVault{% endblock %}
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+  <div>
+    <h1>LegacyVault Leadership Handover</h1>
+    <p class="sub">Institutional memory &amp; historical continuity archives. Passing knowledge to incoming leaders without starting from zero.</p>
+  </div>
+</div>
+
+{% if error %}
+<div class="card" style="border-left: 4px solid var(--neg, #dc2626); margin-bottom: 1.5rem; padding: 1rem;">
+  <p style="color: var(--neg, #dc2626); margin: 0; font-weight: 500;">{{ error }}</p>
+</div>
+{% endif %}
+
+<!-- High-Level Continuity Snapshot -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+  <div class="card" style="text-align: center; padding: 1.25rem;">
+    <p style="margin: 0; color: #64748b; font-size: 0.85rem; text-transform: uppercase; font-weight: 600;">Preserved Handover Records</p>
+    <p style="margin: 0.5rem 0 0 0; font-size: 2rem; font-weight: 700; color: #0f172a;">{{ snapshot.total_records }}</p>
+  </div>
+  <div class="card" style="text-align: center; padding: 1.25rem;">
+    <p style="margin: 0; color: #64748b; font-size: 0.85rem; text-transform: uppercase; font-weight: 600;">Historical Club Events</p>
+    <p style="margin: 0.5rem 0 0 0; font-size: 2rem; font-weight: 700; color: #0f172a;">{{ snapshot.past_events_count }}</p>
+  </div>
+  <div class="card" style="text-align: center; padding: 1.25rem;">
+    <p style="margin: 0; color: #64748b; font-size: 0.85rem; text-transform: uppercase; font-weight: 600;">Active Officer Roster</p>
+    <p style="margin: 0.5rem 0 0 0; font-size: 2rem; font-weight: 700; color: #0f172a;">{{ snapshot.active_officers_count }}</p>
+  </div>
+  <div class="card" style="text-align: center; padding: 1.25rem;">
+    <p style="margin: 0; color: #64748b; font-size: 0.85rem; text-transform: uppercase; font-weight: 600;">Net Treasury Position</p>
+    <p style="margin: 0.5rem 0 0 0; font-size: 1.75rem; font-weight: 700; color: {% if snapshot.net_finance_paise >= 0 %}#16a34a{% else %}#dc2626{% endif %};">
+      ₹{{ "%.2f"|format(snapshot.net_finance_paise / 100) }}
+    </p>
+  </div>
+</div>
+
+<!-- Create Handover Record Form -->
+<div class="card" style="margin-bottom: 2rem;">
+  <h2>Preserve New Handover Document</h2>
+  <p class="sub" style="margin-bottom: 1rem;">Document operational lessons, vendor agreements, budget summaries, and continuity recommendations for the incoming term.</p>
+
+  <form method="POST" action="/legacyvault" style="display: grid; gap: 1rem;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem;">
+      <div>
+        <label for="term_year" style="display: block; font-weight: 500; font-size: 0.875rem; margin-bottom: 0.25rem;">Term Year / Cycle</label>
+        <input type="text" id="term_year" name="term_year" required placeholder="e.g. 2025-2026" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+      </div>
+
+      <div>
+        <label for="category" style="display: block; font-weight: 500; font-size: 0.875rem; margin-bottom: 0.25rem;">Document Category</label>
+        <select id="category" name="category" required style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+          <option value="handover_note">Leadership Handover Note</option>
+          <option value="event_summary">Event Debrief &amp; Playbook</option>
+          <option value="finance_summary">Finance &amp; Budget Review</option>
+          <option value="contact_directory">External Vendors &amp; Contacts</option>
+          <option value="governance">Club Governance &amp; Bylaws</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="event_id" style="display: block; font-weight: 500; font-size: 0.875rem; margin-bottom: 0.25rem;">Associated Event (Optional)</label>
+        <select id="event_id" name="event_id" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+          <option value="">-- General / Non-event specific --</option>
+          {% for ev in club_events %}
+          <option value="{{ ev.id }}">{{ ev.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div>
+      <label for="title" style="display: block; font-weight: 500; font-size: 0.875rem; margin-bottom: 0.25rem;">Title</label>
+      <input type="text" id="title" name="title" required placeholder="Annual Flagship Gala Execution Playbook &amp; Sponsor Rolodex" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px;">
+    </div>
+
+    <div>
+      <label for="content" style="display: block; font-weight: 500; font-size: 0.875rem; margin-bottom: 0.25rem;">Handover Content &amp; Guidance</label>
+      <textarea id="content" name="content" rows="6" required placeholder="Detailed notes: timelines, vendor contacts, budget pitfalls, venue logistics, key learnings..." style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 6px; font-family: inherit;"></textarea>
+    </div>
+
+    <div>
+      <button type="submit" class="button primary">Preserve into LegacyVault</button>
+    </div>
+  </form>
+</div>
+
+<!-- Historical Records Archives -->
+<div class="card">
+  <h2>Leadership Continuity Archives</h2>
+  {% if records %}
+  <div style="display: grid; gap: 1.5rem; margin-top: 1rem;">
+    {% for rec in records %}
+    <div style="border: 1px solid #cbd5e1; border-radius: 8px; padding: 1.25rem; background: #ffffff;">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="background: #0f172a; color: #ffffff; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">
+            Term {{ rec.term_year }}
+          </span>
+          <span style="background: #e2e8f0; color: #334155; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 500; text-transform: uppercase;">
+            {{ rec.category|replace('_', ' ') }}
+          </span>
+          {% if rec.event_name %}
+          <span style="background: #dbeafe; color: #1e40af; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.75rem;">
+            Event: {{ rec.event_name }}
+          </span>
+          {% endif %}
+        </div>
+        <p style="margin: 0; font-size: 0.8rem; color: #64748b;">
+          Preserved by <strong>{{ rec.author_name or 'Club Officer' }}</strong> on {{ rec.created_at.strftime('%b %d, %Y') }}
+        </p>
+      </div>
+
+      <h3 style="margin: 0.5rem 0; font-size: 1.2rem; color: #0f172a;">{{ rec.title }}</h3>
+      <div style="white-space: pre-wrap; font-size: 0.925rem; line-height: 1.6; color: #334155; margin-top: 0.75rem; background: #f8fafc; padding: 1rem; border-radius: 6px; border-left: 3px solid #3b82f6;">
+        {{ rec.content }}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p style="color: #64748b; margin-top: 1rem;">No historical handover documents preserved yet for this club. Current officers can archive key handover playbooks above.</p>
+  {% endif %}
+</div>
+{% endblock %}

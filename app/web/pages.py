@@ -52,7 +52,7 @@ FEATURES = (
     ("event-autopilot", "Event Autopilot", "Events", "Readiness monitoring that flags what an event still needs before doors open.", "/events"),
     ("syncsphere", "SyncSphere", "Calendar", "A conflict-aware schedule for every club event.", "/events"),
     ("certidoo", "CertiDoo", "Certificates", "Issue verifiable digital certificates for participation and service.", "/certificates"),
-    ("legacyvault", "LegacyVault", "Handover", "Pass knowledge to next year's leaders without starting from zero.", None),
+    ("legacyvault", "LegacyVault", "Handover", "Pass knowledge to next year's leaders without starting from zero.", "/legacyvault"),
 )
 
 
@@ -64,6 +64,8 @@ def _features(user: CurrentUser | None) -> list[dict]:
             feature["href"] = "/expenses"
         if feature["id"] == "crewdoo-connect" and user is not None:
             feature["href"] = "/announcements"
+        if feature["id"] == "legacyvault" and (user is None or user.role not in ("president", "treasurer", "event_lead")):
+            feature["href"] = None
     return features
 
 
@@ -516,4 +518,67 @@ async def verify_certificate_direct_page(
             query_code=code,
             error=exc.message,
         )
+
+
+@router.get("/legacyvault")
+async def legacyvault_page(
+    request: Request,
+    user: CurrentUser = Depends(require_roles("president", "treasurer", "event_lead")),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import legacyvault_service
+    snapshot = await legacyvault_service.get_continuity_snapshot(db, user.club_id)
+    records = await legacyvault_service.list_records(db, user.club_id)
+    club_events = await shared_directory.list_events(db, user.club_id)
+
+    return render(
+        request,
+        "legacyvault.html",
+        user,
+        snapshot=snapshot,
+        records=records,
+        club_events=club_events,
+    )
+
+
+@router.post("/legacyvault")
+async def create_legacyvault_record_page(
+    request: Request,
+    user: CurrentUser = Depends(require_roles("president", "treasurer", "event_lead")),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.schemas.legacyvault import HandoverRecordCreate
+    from app.services import legacyvault_service
+    form = await request.form()
+    term_year = str(form.get("term_year", "")).strip()
+    title = str(form.get("title", "")).strip()
+    category = str(form.get("category", "handover_note")).strip()
+    content = str(form.get("content", "")).strip()
+    event_id_raw = form.get("event_id")
+
+    event_id = uuid.UUID(str(event_id_raw)) if event_id_raw else None
+
+    if not term_year or not title or not content:
+        snapshot = await legacyvault_service.get_continuity_snapshot(db, user.club_id)
+        records = await legacyvault_service.list_records(db, user.club_id)
+        club_events = await shared_directory.list_events(db, user.club_id)
+        return render(
+            request,
+            "legacyvault.html",
+            user,
+            snapshot=snapshot,
+            records=records,
+            club_events=club_events,
+            error="Term year, title, and content are required.",
+        )
+
+    req = HandoverRecordCreate(
+        term_year=term_year,
+        title=title,
+        category=category,  # type: ignore
+        content=content,
+        event_id=event_id,
+    )
+    await legacyvault_service.create_record(db, user.club_id, user.id, req)
+    return RedirectResponse(url="/legacyvault", status_code=303)
 

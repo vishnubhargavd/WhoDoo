@@ -109,6 +109,7 @@ async def test_all_web_pages_load_cleanly(client, world, auth):
         ("/treasurer", world.president, 200),
         ("/certificates", world.member, 200),
         ("/certificates/verify", world.member, 200),
+        ("/legacyvault", world.president, 200),
     ]
     for path, user, expected_code in routes:
         res = await client.get(path, headers=auth(user), follow_redirects=True)

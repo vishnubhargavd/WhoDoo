@@ -10,6 +10,7 @@ from app.api.v1 import (
     fairseat_payments,
     gatesync,
     ledger,
+    legacyvault,
     membercore,
     merch,
     payments,
@@ -34,4 +35,5 @@ api_router.include_router(gatesync.router)
 api_router.include_router(membercore.router)
 api_router.include_router(announcements.router)
 api_router.include_router(certidoo.router)
+api_router.include_router(legacyvault.router)
 
