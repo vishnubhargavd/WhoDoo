@@ -225,7 +225,7 @@ def status_label(claim: ExpenseClaim, waiting_on: str | None, first_approver: st
         "approved": "Approved · awaiting payment",
         "paid": "Paid",
         "rejected": "Rejected",
-        "change_requested": "Changes requested · waiting for the submitter to resubmit",
+        "change_requested": "Changes requested · waiting for the submitter to edit and resubmit",
         "draft": "Draft",
     }[claim.status]
 
@@ -407,11 +407,26 @@ async def _can_view(session: AsyncSession, claim: ExpenseClaim, user: CurrentUse
     return False
 
 
-def _extras(claim: ExpenseClaim, user: CurrentUser, people: dict, events: dict) -> dict:
+async def _change_requests(session: AsyncSession, claims: list[ExpenseClaim]) -> dict[uuid.UUID, ApprovalLog]:
+    """The latest "changes requested" entry for each claim that is waiting on its submitter."""
+    waiting = [claim.id for claim in claims if claim.status == "change_requested"]
+    if not waiting:
+        return {}
+    logs = await session.scalars(
+        select(ApprovalLog)
+        .where(ApprovalLog.expense_claim_id.in_(waiting), ApprovalLog.action == "change_requested")
+        .order_by(ApprovalLog.created_at)
+    )
+    return {log.expense_claim_id: log for log in logs}  # later entries overwrite earlier ones
+
+
+def _extras(claim: ExpenseClaim, user: CurrentUser, people: dict, events: dict, request: ApprovalLog | None = None) -> dict:
     def name(user_id):
         return people[user_id].full_name if user_id in people else None
 
     return {
+        "reviewer_note": request.comment if request else None,
+        "reviewer_name": name(request.approver_id) if request else None,
         "submitted_by_name": name(claim.submitted_by),
         "current_approver_name": name(claim.current_approver_id),
         "event_name": events.get(claim.event_id),
@@ -440,14 +455,16 @@ class _ClaimView:
 
 async def present(session: AsyncSession, user: CurrentUser, claims: list[ExpenseClaim]) -> list[ExpenseClaimOut]:
     """Turn claims into API objects, adding people's and events' names and the caller's allowed actions."""
+    requests = await _change_requests(session, claims)
     people = await shared_directory.get_users(
         session,
         [uid for claim in claims
-         for uid in (claim.submitted_by, claim.current_approver_id, claim.first_approved_by, claim.final_approver_id)],
+         for uid in (claim.submitted_by, claim.current_approver_id, claim.first_approved_by, claim.final_approver_id)]
+        + [log.approver_id for log in requests.values()],
     )
     events = {event.id: event.name for event in await shared_directory.list_events(session, user.club_id)}
     return [
-        ExpenseClaimOut.model_validate(_ClaimView(claim, _extras(claim, user, people, events)))
+        ExpenseClaimOut.model_validate(_ClaimView(claim, _extras(claim, user, people, events, requests.get(claim.id))))
         for claim in claims
     ]
 
@@ -513,7 +530,8 @@ async def get_claim_detail(session: AsyncSession, user: CurrentUser, claim_id: u
         )
         for log in logs
     ]
-    extras = _extras(claim, user, people, events) | {
+    request = next((log for log in reversed(logs) if log.action == "change_requested"), None)
+    extras = _extras(claim, user, people, events, request if claim.status == "change_requested" else None) | {
         "approval_history": history,
         "ledger_entry_id": entry.id if entry else None,
         "ledger_payment_status": entry.payment_status if entry else None,

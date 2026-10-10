@@ -74,6 +74,16 @@ async def get_current_user(request: Request, db: AsyncSession = Depends(get_db))
     )
 
 
+async def get_optional_user(request: Request, db: AsyncSession = Depends(get_db)) -> CurrentUser | None:
+    """The caller if they are signed in, otherwise None. For pages that have a public version."""
+    try:
+        return await get_current_user(request, db)
+    except AppError as exc:
+        if exc.status_code == 401:
+            return None
+        raise
+
+
 def require_roles(*roles: str) -> Callable[..., CurrentUser]:
     """Dependency factory: allow only the given roles."""
 

@@ -26,7 +26,7 @@ Everyday commands (run `make help` for the full list):
 | Command | What it does |
 |---|---|
 | `make run` | Start the app with auto-reload (`make run PORT=8080` to change the port) |
-| `make test` | Run all 84 tests against the `whodoo_test` database |
+| `make test` | Run all 142 tests against the `whodoo_test` database |
 | `make test-ledger`, `test-expenses`, `test-approvals`, `test-ocr`, `test-merch`, `test-pages` | Run one area's tests |
 | `make seed` | Wipe the local database and load fresh demo data |
 | `make migrate` | Apply pending SQL migrations |
@@ -159,6 +159,8 @@ submit ──► pending_approval (first) ──approve──► approved ──
 - **The submitter always sees where the claim stands.** Every claim carries a `status_label`, e.g. "First approval by Karthik Nair · awaiting final approval from Rohan Mehta", and the claim page shows each step with the approver's name. Open pages refresh themselves within about five seconds of a change.
 - **Approvers see why they cannot act.** `approval_blocked_reason` explains it, and the approvals page lists claims they first-approved under "You gave the first approval".
 - **The first approver can still reject or send back** a claim they approved; only approving twice is blocked.
+- **A change request is shown to the submitter in full.** Their list and claim page say who asked and what for (`reviewer_name`, `reviewer_note`), with an "Edit and resubmit" button.
+- **One browser, one user.** The demo sign-in is a single cookie, so signing in as someone else in another tab switches every tab. An open page notices and says so instead of quietly showing the other person's data.
 - **First approver:** the linked event's lead. With no event, or when the lead is the submitter, it goes to the treasurer, then the president.
 - **Nobody decides on or pays out their own claim.** This applies to the treasurer too.
 - **Final approval** writes exactly one ledger entry: `reimbursement`, `debit`, `approved`. Nothing is posted after only a first approval, and a claim cannot be marked paid until it is fully approved.
@@ -220,9 +222,28 @@ To switch to Razorpay Test Mode, set the three `RAZORPAY_*` variables and restar
 | `/expenses/approvals` | Approval queue and claims waiting for payment |
 | `/store`, `/store/{product_id}`, `/checkout/{order_id}`, `/orders` | Store, product, payment, my orders |
 | `/admin/merch`, `/admin/merch/orders` | Products, stock, order management |
-| `/dev/login` | Demo sign-in (only with `DEMO_AUTH=1`) |
+| `/` | Landing page, for everyone (`/welcome` redirects here) |
+| `/home` | A signed-in person's home, with live figures |
+| `/login`, `/dev/login` | Sign-in entry point; demo sign-in (only with `DEMO_AUTH=1`) |
 
 Pages read through the same services as the API, and every button calls the JSON API, so there is one code path for writes.
+
+## Frontend and design system
+
+The app's pages are server-rendered Jinja templates. Their look comes from the v0 design in `frontend_design/` (a Next.js landing page and sign-in placeholder), ported into this app rather than run beside it.
+
+| Piece | Where | Notes |
+|---|---|---|
+| Design tokens and every component style | `app/static/styles.css` | The v0 palette (ink, cream, paper, butter, coral, mint, cobalt), Anton display type over Inter, pill controls, ink-outlined cards, status badges, stepper, dialog, toast, motion. Event pages add a little in `app/static/events.css`. |
+| App shell | `app/templates/base.html`, `_head.html`, `_menu.html` | Sticky top bar, section links, sub-navigation and the glass menu. |
+| Navigation model | `navigation()` in `app/web/templating.py` | One list of sections and links with the roles that may see each. Add a module's pages here. |
+| Landing page | `app/templates/landing.html`, route `/` | The sliced title, stickers, ticker and feature grid from the design. Tools that exist here link to them; the others say "Coming soon". |
+| Sign-in | `/login` → `app/templates/dev_login.html` | `/login` is the stable entry point. Today it leads to the demo sign-in; real sign-in should take this route over. |
+| Home | `app/templates/home.html`, route `/home` (where sign-in lands) | Live figures per person from the event, task, expense, ledger and merchandise services. |
+| Interaction | `app/static/app.js` | In-page confirm and reason dialogs (no browser pop-ups), toasts, menu, scroll reveals, hero parallax, magnetic buttons. All motion is switched off for `prefers-reduced-motion`. |
+| Brand assets | `app/static/brand/` | Hero image and stickers from the design, converted to WebP. |
+
+Not ported: the design's live WebGL ribbon scene (three.js). The landing page uses the design's own still image of that scene, with pointer parallax. Fonts load from Google Fonts and fall back to Impact and the system font offline.
 
 ## Seed data
 
@@ -291,7 +312,6 @@ await ledger_service.record_income(
 - **The store page orders one product variant at a time.** The API (`POST /merch/orders`) and every order page handle several items per order; there is no cart in the review UI.
 - **An officer's own large claim needs a third person.** With one treasurer and one president, a ₹1,000+ claim submitted by either of them can only be approved if it is linked to an event whose lead gives the first approval. Otherwise the first approval is refused with `no_final_approver`.
 - **Claims approved before the two-person rule are not rewritten.** To list any large claim that reached approval with a single approver: `SELECT id, title, amount, status FROM expense_claims WHERE status IN ('approved','paid') AND first_approved_by IS NULL AND amount >= 1000;`
-- **Approve, reject and pay buttons use the browser's own confirm and prompt boxes.**
 - **Refunds call the provider before the database commit.** If the commit then failed, a refund could be issued without being recorded.
 - **Stock is not reserved at order time,** so a buyer can reach payment for an item that sells out first. They are refunded automatically.
 - **No pagination on claims and orders lists,** and no CSRF tokens on the review pages (the session cookie is `SameSite=Lax`).

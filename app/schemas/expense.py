@@ -150,6 +150,10 @@ class ExpenseClaimOut(ORMModel):
         default=None, description="For approvers: why the caller cannot approve this pending claim, if they cannot"
     )
     rejection_reason: str | None
+    reviewer_note: str | None = Field(
+        default=None, description="What the reviewer asked to be changed, while the claim is waiting for the submitter"
+    )
+    reviewer_name: str | None = Field(default=None, description="Who asked for the changes")
     allowed_actions: list[ClaimAction] = Field(description="What the caller may do to this claim right now")
     status_label: str = Field(description="Plain-language status, including who the claim is waiting on")
     amount_edited: bool = Field(description="True when the submitter changed the amount OCR read from the receipt")

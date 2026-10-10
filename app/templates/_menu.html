@@ -1,0 +1,46 @@
+{# The glass menu: every destination this user has, plus modules that are not built into this app yet. #}
+<div class="menu-wrap" data-menu>
+  <button type="button" class="menu-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+    <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+  </button>
+  <nav id="site-menu" class="site-menu" aria-label="All sections" hidden>
+    {% set counter = namespace(i=0) %}
+    {% if user %}
+      {% for section in nav.sections %}
+      <h3>{{ section.title }}</h3>
+      <ul>
+        {% for link in section.links %}
+        <li style="--i: {{ counter.i }}"><a href="{{ link.href }}" class="{{ 'active' if link.active }}"
+          {% if link.active %}aria-current="page"{% endif %}>{{ link.label }}</a></li>
+        {% set counter.i = counter.i + 1 %}
+        {% endfor %}
+      </ul>
+      {% endfor %}
+    {% else %}
+      <h3>Explore</h3>
+      <ul>
+        {% for label, href in (("Events", "#event-autopilot"), ("Volunteers", "#crewpulse"), ("Finances", "#trustledger"),
+                               ("Reimbursements", "#snap-to-reimburse"), ("Merchandise", "#merchflow"), ("Calendar", "#syncsphere")) %}
+        <li style="--i: {{ loop.index0 }}"><a href="/{{ href }}">{{ label }}</a></li>
+        {% endfor %}
+      </ul>
+      {% set counter.i = 6 %}
+    {% endif %}
+    <h3>Coming from the rest of the team</h3>
+    <ul>
+      {% for label in nav.coming_soon %}
+      <li style="--i: {{ counter.i + loop.index0 }}"><span class="soon" aria-disabled="true">{{ label }} <small>· soon</small></span></li>
+      {% endfor %}
+    </ul>
+    <h3>Account</h3>
+    <ul>
+      {% if user %}
+        <li style="--i: {{ counter.i + 5 }}"><a href="/">About WhoDoo</a></li>
+        {% if demo_auth %}<li style="--i: {{ counter.i + 6 }}"><a href="/logout">Switch user</a></li>{% endif %}
+        <li class="wide" style="--i: {{ counter.i + 7 }}"><a href="/home">My home</a></li>
+      {% else %}
+        <li class="wide" style="--i: {{ counter.i + 5 }}"><a href="/login">Enter WhoDoo</a></li>
+      {% endif %}
+    </ul>
+  </nav>
+</div>

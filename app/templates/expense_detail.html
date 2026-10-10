@@ -38,6 +38,15 @@
 </ol>
 {% endif %}
 
+{% if claim.status == "change_requested" %}
+<div class="notice info">
+  <strong>{{ claim.reviewer_name or "A reviewer" }} asked for changes:</strong> “{{ claim.reviewer_note }}”
+  {% if "resubmit" in claim.allowed_actions %}
+    <br>Update the claim below and resubmit it. Approval then starts again.
+    <a class="button small" style="margin-left: 8px" href="#resubmit">Edit and resubmit</a>
+  {% else %}<br>It is waiting for {{ claim.submitted_by_name }} to edit and resubmit it.{% endif %}
+</div>
+{% else %}
 <div class="notice {{ 'ok' if claim.status in ('approved', 'paid') else 'error' if claim.status == 'rejected' else 'info' }}">
   <strong>{{ claim.status_label }}.</strong>
   {% if claim.status == "pending_approval" and claim.needs_final_approval %}
@@ -48,6 +57,7 @@
   {% elif claim.status == "paid" %}The ledger balance reflects this reimbursement.
   {% endif %}
 </div>
+{% endif %}
 
 {% if claim.approval_blocked_reason and user.id != claim.submitted_by %}
 <div class="notice info"><strong>You cannot approve this claim.</strong> {{ claim.approval_blocked_reason }}.</div>
@@ -156,7 +166,7 @@
 </div>
 
 {% if "resubmit" in claim.allowed_actions %}
-<div class="card">
+<div class="card" id="resubmit" style="scroll-margin-top: 110px">
   <h2>Make changes and resubmit</h2>
   <form data-api="POST" action="/api/v1/expenses/{{ claim.id }}/resubmit" class="stack">
     <label>Title <input type="text" name="title" value="{{ claim.title }}" minlength="3" required></label>

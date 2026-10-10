@@ -7,7 +7,7 @@ PORT    ?= 8000
 PG_BIN  ?= $(shell brew --prefix postgresql@16 2>/dev/null)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install env db-start db-stop db-create migrate seed run test test-ledger test-expenses test-approvals test-ocr test-merch test-pages receipts psql clean
+.PHONY: help setup install env db-start db-stop db-create migrate seed seed-finance seed-events run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend receipts psql clean
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -44,8 +44,13 @@ db-create: ## Create the whodoo and whodoo_test databases if missing
 migrate: install ## Apply pending SQL migrations to the database in .env
 	$(PY) -m scripts.migrate
 
-seed: install ## Wipe the local database and load fresh demo data
+seed: seed-finance seed-events ## Wipe the local database and load all demo data (finance, then events)
+
+seed-finance: install ## Wipe the local database and load people, money and merchandise demo data
 	$(PY) -m scripts.seed_finance_demo --reset
+
+seed-events: install ## Add event schedules and volunteer tasks to the seeded club (never deletes; runs once)
+	$(PY) -m scripts.seed_events_demo
 
 psql: ## Open a SQL prompt on the local whodoo database
 	$(PG_BIN)/psql -d whodoo
@@ -57,6 +62,9 @@ run: install ## Start the app with auto-reload at http://localhost:8000 (PORT=xx
 
 test: install ## Run all tests (uses the whodoo_test database)
 	$(PY) -m pytest -q
+
+test-events: install ## Run only the events, tasks, Autopilot and SyncSphere tests (Member 2)
+	$(PY) -m pytest -q tests/test_events.py tests/test_tasks.py tests/test_autopilot.py tests/test_syncsphere.py tests/test_event_pages.py
 
 test-ledger: install ## Run only the TrustLedger tests
 	$(PY) -m pytest -q tests/test_ledger.py
@@ -72,6 +80,9 @@ test-ocr: install ## Run only the receipt reading (OCR) tests
 
 test-merch: install ## Run only the MerchFlow and payment tests
 	$(PY) -m pytest -q tests/test_merch.py
+
+test-frontend: install ## Run only the landing, sign-in, home and navigation tests
+	$(PY) -m pytest -q tests/test_frontend.py
 
 test-pages: install ## Run only the HTML page tests
 	$(PY) -m pytest -q tests/test_pages.py

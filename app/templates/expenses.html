@@ -27,7 +27,12 @@
               {{ "First approval done" if claim.status == "pending_approval" and claim.approval_stage == "final" else claim.status | label }}
             </span>
           </td>
-          <td>{{ claim.status_label }}</td>
+          <td>
+            {% if claim.status == "change_requested" %}
+              <strong>{{ claim.reviewer_name or "A reviewer" }} asked for changes:</strong> “{{ claim.reviewer_note }}”
+              <br><a class="button small" style="margin-top: 6px" href="/expenses/{{ claim.id }}#resubmit">Edit and resubmit</a>
+            {% else %}{{ claim.status_label }}{% endif %}
+          </td>
           <td class="num">{{ claim.amount | inr }}</td>
         </tr>
         {% endfor %}

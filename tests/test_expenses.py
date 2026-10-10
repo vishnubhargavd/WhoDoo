@@ -339,3 +339,45 @@ async def test_request_changes_then_resubmit_restarts_approval(client, world, au
     assert [log["action"] for log in body["approval_history"]] == [
         "submitted", "approved", "change_requested", "submitted"
     ]
+
+
+async def test_submitter_sees_what_the_reviewer_asked_for(client, world, auth, submit):
+    """Reported: the treasurer requested changes, and nothing on the member's side said so."""
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+
+    claim = await submit(world.member, amount="640", event=world.bake_sale)
+    url = f"{API}/{claim['id']}"
+    sent_back = await client.post(
+        f"{url}/request-changes", headers=auth(world.treasurer), json={"comment": "Please attach the itemised bill"}
+    )
+    assert sent_back.status_code == 200
+
+    # The member's API view carries the request itself, not just a status.
+    [mine] = (await client.get(API, headers=auth(world.member))).json()
+    assert mine["status"] == "change_requested"
+    assert (mine["reviewer_name"], mine["reviewer_note"]) == ("Tara Treasurer", "Please attach the itemised bill")
+    assert mine["allowed_actions"] == ["resubmit"]
+    detail = (await client.get(url, headers=auth(world.member))).json()
+    assert detail["reviewer_note"] == "Please attach the itemised bill"
+
+    # And so do the member's pages, with a way to act on it.
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.member.id))
+    for path in ("/expenses", f"/expenses/{claim['id']}"):
+        page = (await client.get(path)).text
+        assert "Tara Treasurer asked for changes:" in page and "Please attach the itemised bill" in page
+        assert "Edit and resubmit" in page
+    assert 'id="resubmit"' in (await client.get(f"/expenses/{claim['id']}")).text
+    assert "1 claim waiting for your changes." in (await client.get("/home")).text
+
+    # The treasurer sees it is with the member; a second request replaces the first after resubmission.
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.treasurer.id))
+    assert "waiting for Mia Member to edit and resubmit" in (await client.get(f"/expenses/{claim['id']}")).text
+
+    fixed = {"title": "Bake sale supplies", "description": "Bill attached", "category": "supplies",
+             "amount": "640", "expense_date": "2026-10-03", "event_id": str(world.bake_sale.id)}
+    resubmitted = (await client.post(f"{url}/resubmit", headers=auth(world.member), json=fixed)).json()
+    assert (resubmitted["status"], resubmitted["reviewer_note"]) == ("pending_approval", None)
+    await client.post(f"{url}/request-changes", headers=auth(world.lead), json={"comment": "Wrong event selected"})
+    [mine] = (await client.get(API, headers=auth(world.member))).json()
+    assert (mine["reviewer_name"], mine["reviewer_note"]) == ("Leo Lead", "Wrong event selected")

@@ -20,17 +20,19 @@ router = APIRouter(include_in_schema=False)
 
 
 def _safe_next(target: str | None) -> str:
-    return target if target and target.startswith("/") and not target.startswith("//") else "/"
+    # After signing in, people go to their own home, never back to the public landing page.
+    safe = bool(target) and target.startswith("/") and not target.startswith("//") and target != "/"
+    return target if safe else "/home"
 
 
 @router.get("/dev/login")
-async def login_page(request: Request, next: str = "/", db: AsyncSession = Depends(get_db)):
+async def login_page(request: Request, next: str = "/home", db: AsyncSession = Depends(get_db)):
     users = await shared_directory.list_users(db)
     return render(request, "dev_login.html", users=users, next=_safe_next(next))
 
 
 @router.post("/dev/login")
-async def login(user_id: uuid.UUID = Form(...), next: str = Form("/"), db: AsyncSession = Depends(get_db)):
+async def login(user_id: uuid.UUID = Form(...), next: str = Form("/home"), db: AsyncSession = Depends(get_db)):
     user = await shared_directory.get_user(db, user_id)
     if user is None:
         raise not_found("User")
@@ -47,6 +49,6 @@ async def login(user_id: uuid.UUID = Form(...), next: str = Form("/"), db: Async
 
 @router.get("/logout")
 async def logout():
-    response = RedirectResponse("/dev/login", status_code=303)
+    response = RedirectResponse("/login", status_code=303)  # "Switch user": straight back to the picker
     response.delete_cookie(get_settings().session_cookie)
     return response

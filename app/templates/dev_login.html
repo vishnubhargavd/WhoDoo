@@ -1,34 +1,46 @@
-{% extends "base.html" %}
-{% block title %}Demo sign-in · WhoDoo{% endblock %}
-{% block content %}
-<h1>Demo sign-in</h1>
-<p class="sub">Temporary stand-in for the real login. Pick a seeded user to act as.</p>
-<div class="card">
-  {% if users %}
-  <div class="table-wrap">
-    <table>
-      <thead><tr><th>Name</th><th>Role</th><th>Member</th><th>Email</th><th></th></tr></thead>
-      <tbody>
-        {% for person in users %}
-        <tr>
-          <td>{{ person.full_name }}</td>
-          <td><span class="badge">{{ person.role | label }}</span></td>
-          <td>{{ "Active" if person.is_active_member else "No" }}</td>
-          <td class="muted">{{ person.email }}</td>
-          <td class="right">
-            <form method="post" action="/dev/login">
-              <input type="hidden" name="user_id" value="{{ person.id }}">
-              <input type="hidden" name="next" value="{{ next }}">
-              <button class="small" type="submit">Sign in</button>
-            </form>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Sign in · WhoDoo</title>
+{% include "_head.html" %}
+</head>
+<body>
+<main class="frame">
+  <div class="panel signin">
+    <a class="brand" href="/" aria-label="WhoDoo home"><span class="brand-mark" aria-hidden="true"><span>W</span></span></a>
+    <h1>Enter WhoDoo</h1>
+    <p class="sub" style="margin: 0 auto">
+      Demo sign-in. Pick someone from the seeded club to act as them. This stands in for the real
+      sign-in, which the membership module will connect here.
+    </p>
+
+    {% if users %}
+    <ul class="people">
+      {% for person in users %}
+      <li>
+        <form method="post" action="/dev/login">
+          <input type="hidden" name="user_id" value="{{ person.id }}">
+          <input type="hidden" name="next" value="{{ next }}">
+          <button class="person secondary" type="submit" aria-label="Sign in as {{ person.full_name }}, {{ person.role | label }}">
+            <span class="avatar" aria-hidden="true">{{ person.full_name[0] }}</span>
+            <span>
+              <span class="name">{{ person.full_name }}</span>
+              <span class="role">{{ person.role | label }}{{ " · active member" if person.is_active_member else " · not a member" }}</span>
+            </span>
+          </button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="card" style="max-width: 520px">
+      <p class="empty">No users yet. Run <code>make seed</code> first.</p>
+    </div>
+    {% endif %}
+
+    <a class="button secondary" href="/">← Back home</a>
   </div>
-  {% else %}
-  <p class="empty">No users yet. Run <code>python -m scripts.seed_finance_demo</code> first.</p>
-  {% endif %}
-</div>
-{% endblock %}
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

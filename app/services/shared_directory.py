@@ -11,7 +11,11 @@ from collections.abc import Iterable
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.shared import Event, User
+from app.models.shared import Club, Event, User
+
+
+async def get_club(session: AsyncSession, club_id: uuid.UUID) -> Club | None:
+    return await session.get(Club, club_id)
 
 
 async def get_user(session: AsyncSession, user_id: uuid.UUID) -> User | None:

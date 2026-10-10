@@ -6,19 +6,22 @@
 .badge.blocked, .badge.at_risk, .badge.overdue, .badge.critical { background: var(--red-bg); color: var(--red); }
 .badge.completed, .badge.todo, .badge.low, .badge.medium { background: var(--gray-bg); color: var(--gray); }
 
-.tabs { display: flex; gap: 6px; margin-bottom: 14px; }
-.tabs a { padding: 6px 12px; border-radius: 7px; color: var(--muted); }
-.tabs a.active { background: var(--card); border: 1px solid var(--line); color: var(--text); font-weight: 600; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+.tabs a {
+  padding: 7px 16px; border: 1.5px solid var(--ink); border-radius: 999px; background: var(--paper); color: var(--text);
+  font-size: 12px; font-weight: 600; text-transform: uppercase; text-decoration: none;
+}
+.tabs a.active { background: var(--ink); color: var(--paper); }
 
 .event-row { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center; }
 .event-row h2 { margin: 0; }
 .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
 
-.progress { height: 8px; border-radius: 4px; background: var(--gray-bg); overflow: hidden; min-width: 120px; }
-.progress > span { display: block; height: 100%; background: var(--green); }
+.progress { height: 10px; border: 1px solid var(--ink); border-radius: 999px; background: var(--paper); overflow: hidden; min-width: 120px; }
+.progress > span { display: block; height: 100%; background: var(--mint); border-right: 1px solid var(--ink); transform-origin: left; animation: grow 0.9s var(--ease-out) both; }
 
 .score { display: flex; align-items: baseline; gap: 10px; }
-.score .value { font-size: 40px; font-weight: 700; line-height: 1; }
+.score .value { font-family: var(--font-display); font-size: 64px; font-weight: 400; line-height: 0.9; }
 .score.on_track .value { color: var(--green); }
 .score.needs_attention .value { color: var(--amber); }
 .score.at_risk .value { color: var(--red); }
@@ -32,16 +35,16 @@
 .factors .next { font-size: 13px; }
 .factors .evidence { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
 
-.risk-row td { background: #fffaf2; }
+.risk-row td { background: rgba(244, 240, 104, 0.22); }
 .blocker { font-size: 13px; color: var(--red); margin-top: 4px; }
 .inline-form { display: flex; gap: 6px; align-items: center; }
 .inline-form select { width: auto; min-width: 140px; padding: 4px 8px; font-size: 13px; }
-details.add-task summary { cursor: pointer; font-weight: 600; color: var(--brand); }
+details.add-task summary { cursor: pointer; font-weight: 600; text-transform: uppercase; font-size: 13px; color: var(--brand); }
 details.add-task[open] summary { margin-bottom: 12px; }
 .check { display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
 .check input { width: auto; }
 
 @media (max-width: 600px) {
   .event-row { grid-template-columns: 1fr; }
-  .score .value { font-size: 32px; }
+  .score .value { font-size: 48px; }
 }
