@@ -1,14 +1,17 @@
-"""FairSeat: ticket categories, holds and bookings.
+"""FairSeat: holds and bookings, the reservation side of ticketing.
 
 The one rule everything here protects: for each ticket category,
 
     seats in use = confirmed seats + seats on a hold that has not run out
     seats in use <= capacity
 
-Locking. Anything that can change the seats in use (booking, cancelling, expiring
-holds, changing a category) first locks the event row, then the category rows in id
-order, with SELECT ... FOR UPDATE. One event's bookings therefore happen one at a
-time, and the seat count is always taken while holding those locks. The locks last
+and, across an event, the seats in use never exceed the event's ticket capacity.
+(The count itself is ticket_inventory's; the same one the event side uses.)
+
+Locking. Anything that can change the seats in use first takes the ticket locks in the
+one agreed order (ticket_locks): the event row, its ticket settings row, the category
+rows in id order, and only then booking rows. One event's bookings therefore happen one
+at a time, and the seat count is always taken while holding those locks. The locks last
 until the route commits or rolls back.
 
 Transactions. Like the rest of the app, functions here flush and never commit. The
@@ -18,6 +21,9 @@ stored together or not at all. When a function raises, nothing it did is kept.
 Holds. A hold stops counting the moment its deadline passes, whether or not anything
 has marked it expired yet. `expire_holds` and the booking path only tidy the status.
 
+Ticket settings and categories are written in one place, ticket_service.save_config.
+The category routes here are a second door to that same writer.
+
 Not in this phase: payment, ledger entries, QR credentials, waitlists.
 """
 
@@ -26,7 +32,8 @@ import json
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, func, or_, select, update
+from pydantic import ValidationError
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -34,6 +41,7 @@ from app.core.dependencies import CurrentUser
 from app.core.errors import bad_request, conflict, forbidden, not_found
 from app.models.fairseat import EventTicket, TicketBooking, TicketBookingCommand, TicketCategory, TicketQuote
 from app.models.shared import Event
+from app.models.tickets import EventTicketSettings
 from app.schemas.fairseat import (
     BookingOut,
     CategoryCreate,
@@ -43,53 +51,27 @@ from app.schemas.fairseat import (
     ReservationRequest,
     TicketOut,
 )
-from app.services import audit_service, event_service, fairseat_pricing
+from app.schemas.tickets import TicketCategoryIn, TicketConfigIn
+from app.services import (
+    audit_service,
+    event_service,
+    fairseat_pricing,
+    ticket_inventory,
+    ticket_locks,
+    ticket_service,
+)
 
 B = TicketBooking
-OPEN_FOR_SETUP = ("draft", "published")
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# --- Locks and counting ----------------------------------------------------------------
+# --- Counting --------------------------------------------------------------------------
 
-
-async def _lock_event(session: AsyncSession, event_id: uuid.UUID) -> Event | None:
-    stmt = select(Event).where(Event.id == event_id).with_for_update().execution_options(populate_existing=True)
-    return await session.scalar(stmt)
-
-
-async def _lock_categories(session: AsyncSession, category_ids) -> dict[uuid.UUID, TicketCategory]:
-    """Lock category rows in id order. Always call after `_lock_event`."""
-    stmt = (
-        select(TicketCategory)
-        .where(TicketCategory.id.in_(set(category_ids)))
-        .order_by(TicketCategory.id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
-    return {category.id: category for category in await session.scalars(stmt)}
-
-
-def _in_use(now: datetime):
-    """Bookings that take up seats at `now`."""
-    return or_(B.status == "confirmed", and_(B.status == "pending_payment", B.hold_expires_at > now))
-
-
-async def occupied_seats(session: AsyncSession, category_ids, now: datetime) -> dict[uuid.UUID, int]:
-    ids = list(category_ids)
-    if not ids:
-        return {}
-    rows = await session.execute(
-        select(B.ticket_category_id, func.coalesce(func.sum(B.quantity), 0))
-        .where(B.ticket_category_id.in_(ids), _in_use(now))
-        .group_by(B.ticket_category_id)
-    )
-    counts = dict.fromkeys(ids, 0)
-    counts.update({category_id: int(total) for category_id, total in rows})
-    return counts
+occupied_seats = ticket_inventory.occupied_seats   # the single definition of "seats in use"
+_in_use = ticket_inventory.in_use
 
 
 async def _seats_held_by(session: AsyncSession, event_id: uuid.UUID, user_id: uuid.UUID, now: datetime) -> int:
@@ -114,28 +96,39 @@ async def _mark_expired(session: AsyncSession, now: datetime, *conditions) -> in
 # --- Presenting ------------------------------------------------------------------------
 
 
-def _why_not_on_sale(event: Event, category: TicketCategory, now: datetime) -> tuple[str, str] | None:
+def _why_not_on_sale(
+    event: Event, settings: EventTicketSettings | None, category: TicketCategory, now: datetime
+) -> tuple[str, str] | None:
     """None when this category can be booked right now; otherwise an error code and message."""
     if event.status != "published":
         return "event_not_bookable", f"This event is {event.status} and is not taking bookings."
     if event.starts_at is None:
         return "event_not_bookable", "This event has no start time yet, so it cannot be booked."
+    if settings is None or not settings.sales_enabled:
+        return "sales_not_enabled", "Ticket sales are not switched on for this event."
     if not category.active:
         return "category_closed", "This ticket category is not on sale."
-    if now < category.sales_open_at:
+    # The category's own window, never wider than the event's.
+    opens, closes = ticket_service.effective_window(settings, category)
+    if now < opens:
         return "booking_not_open", "Booking for this ticket category has not opened yet."
-    if now >= category.sales_close_at or now >= event.starts_at:
+    if now >= closes or now >= event.starts_at:
         return "booking_closed", "Booking for this ticket category has closed."
     return None
 
 
-def _category_out(event: Event, category: TicketCategory, occupied: int, now: datetime) -> CategoryOut:
+def _category_out(
+    event: Event, settings: EventTicketSettings | None, category: TicketCategory, occupied: int, now: datetime
+) -> CategoryOut:
+    opens, closes = ticket_service.effective_window(settings, category) if settings else (
+        category.sales_open_at, category.sales_close_at)
     return CategoryOut(
-        id=category.id, event_id=category.event_id, name=category.name,
+        id=category.id, event_id=category.event_id, name=category.name, description=category.description,
         base_price_paise=category.base_price_paise, pricing_version=category.pricing_version,
+        member_discount_eligible=category.member_discount_eligible, sort_order=category.sort_order,
         capacity=category.capacity, occupied=occupied, available=max(category.capacity - occupied, 0),
-        sales_open_at=category.sales_open_at, sales_close_at=category.sales_close_at, active=category.active,
-        on_sale=_why_not_on_sale(event, category, now) is None,
+        sales_open_at=opens, sales_close_at=closes, active=category.active,
+        on_sale=_why_not_on_sale(event, settings, category, now) is None,
     )
 
 
@@ -174,56 +167,74 @@ async def _present(
 
 
 # --- Categories ------------------------------------------------------------------------
+# A second door to the one category writer, ticket_service.save_config. Each call sends that
+# writer the event's whole configuration with one category added or changed, so the partition,
+# window and lock rules are exactly those of the organizer page.
 
 
-async def _managed_event_locked(session: AsyncSession, user: CurrentUser, event_id: uuid.UUID) -> Event:
-    event = await _lock_event(session, event_id)
+async def _managed_event(session: AsyncSession, user: CurrentUser, event_id: uuid.UUID) -> Event:
+    event = await ticket_locks.lock_event(session, event_id)
     if event is None or event.club_id != user.club_id:
         raise not_found("Event")
     if not event_service.can_manage(user, event):
         raise forbidden("Only the president or this event's lead can set up its tickets")
-    if event.status not in OPEN_FOR_SETUP:
-        raise conflict("event_closed", f"Tickets cannot be changed for an event that is {event.status}")
     return event
 
 
-def _check_window(event: Event, opens: datetime, closes: datetime) -> None:
-    if closes <= opens:
-        raise bad_request("invalid_sales_window", "Sales must close after they open")
-    if event.starts_at is not None and closes > event.starts_at:
-        raise bad_request("sales_close_after_start", "Sales cannot close later than the event starts")
+async def _current_config(
+    session: AsyncSession, event: Event
+) -> tuple[EventTicketSettings, list[TicketCategory]]:
+    settings = await ticket_locks.lock_settings(session, event.id)
+    if settings is None:
+        raise conflict(
+            "ticketing_not_configured",
+            "Set this event's ticket capacity and booking window first (PUT /events/{id}/tickets).",
+        )
+    categories = sorted((await ticket_locks.lock_event_categories(session, event.id)).values(),
+                        key=lambda c: (c.sort_order, c.name))
+    return settings, categories
 
 
-async def _name_taken(session: AsyncSession, event_id: uuid.UUID, name: str, ignore: uuid.UUID | None = None) -> bool:
-    stmt = select(TicketCategory.id).where(
-        TicketCategory.event_id == event_id, func.lower(func.btrim(TicketCategory.name)) == name.strip().lower()
-    )
-    if ignore:
-        stmt = stmt.where(TicketCategory.id != ignore)
-    return await session.scalar(stmt) is not None
+def _as_input(category: TicketCategory, **changes) -> TicketCategoryIn:
+    """An existing category as the writer's input. Fields that are left out keep their values."""
+    fields = {
+        "id": category.id, "name": category.name, "description": category.description,
+        "price_paise": category.base_price_paise, "capacity": category.capacity,
+        "member_discount_eligible": category.member_discount_eligible, "is_visible": category.active,
+    }
+    return TicketCategoryIn(**(fields | changes))
+
+
+async def _save(
+    session: AsyncSession, user: CurrentUser, event: Event, settings: EventTicketSettings,
+    items: list[TicketCategoryIn], now: datetime,
+) -> list[TicketCategory]:
+    return await ticket_service.save_config(session, user, event, TicketConfigIn(
+        sales_enabled=settings.sales_enabled, capacity=settings.capacity, opens_at=settings.opens_at,
+        closes_at=settings.closes_at, max_per_booking=settings.max_per_booking, categories=items,
+    ), now)
+
+
+def _from_request(changes: dict) -> dict:
+    """This API's field names, as the writer's."""
+    renamed = {"base_price_paise": "price_paise", "active": "is_visible"}
+    return {renamed.get(field, field): value for field, value in changes.items()}
 
 
 async def create_category(
     session: AsyncSession, user: CurrentUser, data: CategoryCreate, now: datetime | None = None
 ) -> CategoryOut:
     now = now or utcnow()
-    event = await _managed_event_locked(session, user, data.event_id)
-    _check_window(event, data.sales_open_at, data.sales_close_at)
-    if await _name_taken(session, event.id, data.name):
-        raise conflict("duplicate_category", f"This event already has a ticket category called {data.name}")
-    category = TicketCategory(
-        id=uuid.uuid4(), event_id=event.id, name=data.name, base_price_paise=data.base_price_paise,
-        pricing_version=1, capacity=data.capacity, sales_open_at=data.sales_open_at,
-        sales_close_at=data.sales_close_at, active=data.active, created_by=user.id,
-    )
-    session.add(category)
-    await session.flush()
-    audit_service.record(
-        session, club_id=user.club_id, actor_id=user.id, action="fairseat.category_created",
-        entity_type="ticket_category", entity_id=category.id,
-        details={"event_id": str(event.id), "capacity": category.capacity, "base_price_paise": category.base_price_paise},
-    )
-    return _category_out(event, category, 0, now)
+    event = await _managed_event(session, user, data.event_id)
+    settings, categories = await _current_config(session, event)
+    try:
+        new = TicketCategoryIn(**_from_request(data.model_dump(exclude={"event_id"}, exclude_unset=True)))
+    except ValidationError as exc:
+        raise bad_request("invalid_category", "; ".join(error["msg"] for error in exc.errors())) from exc
+    if any(c.name.strip().lower() == new.name.strip().lower() for c in categories):
+        raise conflict("duplicate_category", f"This event already has a ticket category called {new.name}")
+    saved = await _save(session, user, event, settings, [_as_input(c) for c in categories] + [new], now)
+    return _category_out(event, settings, saved[-1], 0, now)
 
 
 async def update_category(
@@ -233,33 +244,20 @@ async def update_category(
     event_id = await session.scalar(select(TicketCategory.event_id).where(TicketCategory.id == category_id))
     if event_id is None:
         raise not_found("Ticket category")
-    event = await _managed_event_locked(session, user, event_id)
-    category = (await _lock_categories(session, [category_id]))[category_id]
-    occupied = (await occupied_seats(session, [category_id], now))[category_id]
-    changes = data.model_dump(exclude_unset=True, exclude_none=True)
-
-    _check_window(
-        event, changes.get("sales_open_at", category.sales_open_at), changes.get("sales_close_at", category.sales_close_at)
-    )
-    if "capacity" in changes and changes["capacity"] < occupied:
-        raise conflict(
-            "capacity_below_occupied",
-            f"{occupied} seats are already taken, so capacity cannot be set to {changes['capacity']}",
-            {"occupied": occupied, "requested": changes["capacity"]},
-        )
-    if "name" in changes and await _name_taken(session, event.id, changes["name"], ignore=category.id):
+    event = await _managed_event(session, user, event_id)
+    settings, categories = await _current_config(session, event)
+    changes = _from_request(data.model_dump(exclude_unset=True, exclude_none=True))
+    try:
+        items = [_as_input(c, **(changes if c.id == category_id else {})) for c in categories]
+    except ValidationError as exc:
+        raise bad_request("invalid_category", "; ".join(error["msg"] for error in exc.errors())) from exc
+    names = [item.name.strip().lower() for item in items]
+    if len(set(names)) != len(names):
         raise conflict("duplicate_category", f"This event already has a ticket category called {changes['name']}")
-    if "base_price_paise" in changes and changes["base_price_paise"] != category.base_price_paise:
-        category.pricing_version += 1  # quotes for the old price are refused from now on
-    for field, value in changes.items():
-        setattr(category, field, value)
-    category.updated_at = now
-    await session.flush()
-    audit_service.record(
-        session, club_id=user.club_id, actor_id=user.id, action="fairseat.category_updated",
-        entity_type="ticket_category", entity_id=category.id, details={"changed": sorted(changes)},
-    )
-    return _category_out(event, category, occupied, now)
+    saved = await _save(session, user, event, settings, items, now)
+    category = next(c for c in saved if c.id == category_id)
+    occupied = (await occupied_seats(session, [category_id], now))[category_id]
+    return _category_out(event, settings, category, occupied, now)
 
 
 async def list_categories(
@@ -267,37 +265,45 @@ async def list_categories(
 ) -> list[CategoryOut]:
     now = now or utcnow()
     event = await event_service.get_visible_event(session, user, event_id)
+    settings = await ticket_service.get_settings_row(session, event.id)
     categories = list(await session.scalars(
-        select(TicketCategory).where(TicketCategory.event_id == event.id).order_by(TicketCategory.created_at, TicketCategory.id)
+        select(TicketCategory).where(TicketCategory.event_id == event.id)
+        .order_by(TicketCategory.sort_order, TicketCategory.name, TicketCategory.id)
     ))
     counts = await occupied_seats(session, [category.id for category in categories], now)
-    return [_category_out(event, category, counts[category.id], now) for category in categories]
+    return [_category_out(event, settings, category, counts[category.id], now) for category in categories]
 
 
 # --- Quotes ----------------------------------------------------------------------------
 
 
-def _check_quantity(quantity: int) -> None:
+def _check_quantity(quantity: int, settings: EventTicketSettings | None = None) -> None:
+    """The app-wide limit, tightened by the event's own `max_per_booking` when it is smaller."""
     limit = get_settings().fairseat_max_per_booking
+    if settings is not None:
+        limit = min(limit, settings.max_per_booking)
     if quantity > limit:
         raise bad_request("invalid_quantity", f"You can book at most {limit} tickets at a time", {"limit": limit})
 
 
 async def _event_and_category(
     session: AsyncSession, user: CurrentUser, event_id: uuid.UUID, category_id: uuid.UUID, *, lock: bool
-) -> tuple[Event, TicketCategory]:
-    """Both rows, from the database, for someone in the event's club. The club comes from the
-    signed-in user's own record, never from the request."""
-    event = await _lock_event(session, event_id) if lock else await session.get(Event, event_id)
+) -> tuple[Event, EventTicketSettings | None, TicketCategory]:
+    """The event, its ticket settings and the category, from the database, for someone in the
+    event's club. The club comes from the signed-in user's own record, never from the request.
+    With lock=True they are locked in the agreed order: event, settings, category."""
+    if lock:
+        event, settings, categories = await ticket_locks.lock_for_event(session, event_id, [category_id])
+        category = categories.get(category_id)
+    else:
+        event = await session.get(Event, event_id)
+        settings = await ticket_service.get_settings_row(session, event_id) if event else None
+        category = await session.get(TicketCategory, category_id)
     if event is None or event.club_id != user.club_id:
         raise not_found("Event")
-    if lock:
-        category = (await _lock_categories(session, [category_id])).get(category_id)
-    else:
-        category = await session.get(TicketCategory, category_id)
     if category is None or category.event_id != event.id:
         raise not_found("Ticket category")
-    return event, category
+    return event, settings, category
 
 
 async def create_quote(
@@ -305,10 +311,12 @@ async def create_quote(
 ) -> TicketQuote:
     now = now or utcnow()
     _check_quantity(data.quantity)
-    event, category = await _event_and_category(session, user, data.event_id, data.ticket_category_id, lock=False)
-    closed = _why_not_on_sale(event, category, now)
+    event, settings, category = await _event_and_category(
+        session, user, data.event_id, data.ticket_category_id, lock=False)
+    closed = _why_not_on_sale(event, settings, category, now)
     if closed:
         raise conflict(*closed)
+    _check_quantity(data.quantity, settings)
     return await fairseat_pricing.issue_quote(
         session, user_id=user.id, event=event, category=category, quantity=data.quantity, now=now
     )
@@ -373,13 +381,14 @@ def _new_tickets(booking: TicketBooking) -> list[EventTicket]:
 async def reserve(
     session: AsyncSession, user: CurrentUser, data: ReservationRequest, now: datetime | None = None
 ) -> BookingOut:
-    """Hold seats (or confirm them outright when they are free). Runs under the event and
-    category locks; the caller commits. Repeating a request with the same idempotency key
+    """Hold seats (or confirm them outright when they are free). Runs under the event, settings
+    and category locks; the caller commits. Repeating a request with the same idempotency key
     returns the booking it made the first time."""
     now = now or utcnow()
     settings = get_settings()
     _check_quantity(data.quantity)
-    event, category = await _event_and_category(session, user, data.event_id, data.ticket_category_id, lock=True)
+    event, ticket_settings, category = await _event_and_category(
+        session, user, data.event_id, data.ticket_category_id, lock=True)
 
     # Looked up under the lock, so two copies of one request cannot both find "no earlier request".
     fingerprint = _fingerprint(data)
@@ -396,9 +405,10 @@ async def reserve(
         booking = await session.get(TicketBooking, earlier.booking_id)
         return (await _present(session, [booking], now, replayed=True))[0]
 
-    closed = _why_not_on_sale(event, category, now)
+    closed = _why_not_on_sale(event, ticket_settings, category, now)
     if closed:
         raise conflict(*closed)
+    _check_quantity(data.quantity, ticket_settings)
     quote = await _accepted_quote(session, user, data, event, category, now)
     await _mark_expired(session, now, B.event_id == event.id)
 
@@ -409,7 +419,12 @@ async def reserve(
             "purchaser_limit", f"You can hold at most {limit} tickets for this event and already have {held}.",
             {"limit": limit, "held": held, "requested": data.quantity},
         )
-    available = category.capacity - (await occupied_seats(session, [category.id], now))[category.id]
+    # Both limits, counted under the locks: the category's own seats, and the event's ticket
+    # capacity across all of its categories. (The partition makes the second follow from the
+    # first, but neither is taken on trust.)
+    event_categories = list(await session.scalars(select(TicketCategory.id).where(TicketCategory.event_id == event.id)))
+    counts = await occupied_seats(session, event_categories, now)
+    available = min(category.capacity - counts[category.id], ticket_settings.capacity - sum(counts.values()))
     if available < data.quantity:
         raise conflict(
             "sold_out",
@@ -490,12 +505,9 @@ async def cancel_booking(
     )).first()
     if found is None or found.purchaser_user_id != user.id:
         raise not_found("Booking")
-    # Same lock order as booking: event, then category, then the booking row itself.
-    await _lock_event(session, found.event_id)
-    await _lock_categories(session, [found.ticket_category_id])
-    booking = await session.scalar(
-        select(B).where(B.id == booking_id).with_for_update().execution_options(populate_existing=True)
-    )
+    # Same lock order as booking: event, settings, category, then the booking row itself.
+    await ticket_locks.lock_for_event(session, found.event_id, [found.ticket_category_id])
+    booking = await ticket_locks.lock_booking(session, booking_id)
     before = booking.status
     await _release(session, booking, now)
     await session.flush()
@@ -508,8 +520,9 @@ async def cancel_booking(
 
 
 async def expire_holds(session: AsyncSession, now: datetime | None = None, batch_size: int = 200) -> int:
-    """Mark holds past their deadline as expired. Events and categories are locked in id
-    order, so two sweeps (or a sweep and a booking) cannot deadlock. The caller commits."""
+    """Mark holds past their deadline as expired. Events are taken in id order and, within each,
+    the locks in the agreed order, so two sweeps (or a sweep and a booking) cannot deadlock.
+    The caller commits."""
     now = now or utcnow()
     due = (await session.execute(
         select(B.event_id, B.ticket_category_id)
@@ -522,8 +535,7 @@ async def expire_holds(session: AsyncSession, now: datetime | None = None, batch
         by_event.setdefault(event_id, set()).add(category_id)
     expired = 0
     for event_id in sorted(by_event):
-        await _lock_event(session, event_id)
-        await _lock_categories(session, by_event[event_id])
+        await ticket_locks.lock_for_event(session, event_id, by_event[event_id])
         expired += await _mark_expired(session, now, B.event_id == event_id)
     return expired
 
@@ -553,7 +565,7 @@ async def get_booking(
 
 
 # --- For the event module --------------------------------------------------------------
-# Not called from anywhere yet. Offered to Member 2 as the one hook `change_status` needs.
+# Called by ticket_service.guard_status_change, inside the event's own status transaction.
 
 
 async def release_bookings_for_event(session: AsyncSession, event_id: uuid.UUID, now: datetime | None = None) -> int:
@@ -564,9 +576,7 @@ async def release_bookings_for_event(session: AsyncSession, event_id: uuid.UUID,
     not exist yet, so the cancellation must not go ahead.
     """
     now = now or utcnow()
-    await _lock_event(session, event_id)
-    category_ids = await session.scalars(select(TicketCategory.id).where(TicketCategory.event_id == event_id))
-    await _lock_categories(session, list(category_ids))
+    await ticket_locks.lock_for_event(session, event_id)  # event, settings, every category
     bookings = list(await session.scalars(
         select(B).where(B.event_id == event_id, B.status.in_(("pending_payment", "confirmed")))
         .order_by(B.id).with_for_update().execution_options(populate_existing=True)

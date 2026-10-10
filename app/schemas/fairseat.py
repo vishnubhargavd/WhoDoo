@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from app.schemas.common import ORMModel
+from app.services.ticket_rules import MAX_NAME_LENGTH, MAX_PRICE_PAISE
 
 IdempotencyKey = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,128}$")]
 Paise = Annotated[int, Field(ge=0, le=9_007_199_254_740_991, strict=True)]
@@ -26,22 +27,35 @@ class _Strict(BaseModel):
 # --- Categories ------------------------------------------------------------------------
 
 
+# A ticket price: whole paise, up to ₹1,00,000 per ticket.
+PricePaise = Annotated[int, Field(ge=0, le=MAX_PRICE_PAISE, strict=True)]
+
+
 class CategoryCreate(_Strict):
+    """One more category for an event whose ticket settings already exist. Goes through the
+    same writer as the organizer page, so while sales are on, the categories must still add up
+    to the event's capacity exactly."""
+
     event_id: uuid.UUID
-    name: str = Field(min_length=1, max_length=120)
-    base_price_paise: Paise
+    name: str = Field(min_length=1, max_length=MAX_NAME_LENGTH)
+    description: str | None = Field(default=None, max_length=300)
+    base_price_paise: PricePaise
     capacity: int = Field(gt=0, le=100_000, strict=True)
-    sales_open_at: Moment
-    sales_close_at: Moment
+    # Optional narrower window inside the event's booking window. Both or neither.
+    sales_open_at: Moment | None = None
+    sales_close_at: Moment | None = None
+    member_discount_eligible: bool = True
     active: bool = True
 
 
 class CategoryUpdate(_Strict):
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    base_price_paise: Paise | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=MAX_NAME_LENGTH)
+    description: str | None = Field(default=None, max_length=300)
+    base_price_paise: PricePaise | None = None
     capacity: int | None = Field(default=None, gt=0, le=100_000, strict=True)
     sales_open_at: Moment | None = None
     sales_close_at: Moment | None = None
+    member_discount_eligible: bool | None = None
     active: bool | None = None
 
 
@@ -49,13 +63,16 @@ class CategoryOut(ORMModel):
     id: uuid.UUID
     event_id: uuid.UUID
     name: str
+    description: str | None = None
     base_price_paise: int
     pricing_version: int
+    member_discount_eligible: bool = True
+    sort_order: int = 0
     capacity: int
     occupied: int = Field(description="Confirmed seats plus seats on an unexpired hold")
     available: int
-    sales_open_at: datetime
-    sales_close_at: datetime
+    sales_open_at: datetime | None = Field(description="When this category can be booked from: its own window inside the event's")
+    sales_close_at: datetime | None
     active: bool
     on_sale: bool = Field(description="Bookable right now: event published, category active, inside the window")
 

@@ -157,9 +157,13 @@ async def price_for(
     session: AsyncSession, *, user_id: uuid.UUID, event: Event, category: TicketCategory, now: datetime
 ) -> DiscountResult:
     """The unit price this purchaser pays right now, from server data only."""
-    membership = await get_membership_source().membership_for(
-        session, user_id=user_id, club_id=event.club_id, now=now
-    )
+    membership = None
+    if category.member_discount_eligible:
+        # A category the organizer marked as not eligible is priced as if no membership
+        # were presented. The calculator itself is unchanged.
+        membership = await get_membership_source().membership_for(
+            session, user_id=user_id, club_id=event.club_id, now=now
+        )
     return calculate_ticket_discount(
         base_price_paise=category.base_price_paise,
         event_club_id=str(event.club_id),
