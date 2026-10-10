@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Checkout {{ order.order_number }} · WhoDoo{% endblock %}
+{% block content %}
+<h1>Checkout</h1>
+<p class="sub">Order {{ order.order_number }}</p>
+
+{% if provider.is_mock %}
+<div class="notice info"><strong>Mock Payment (Stripe-compatible).</strong>
+  No real money moves. The order still goes through the same checkout session → server verification → ledger steps as Stripe.</div>
+{% else %}
+<div class="notice info"><strong>Stripe Test Mode.</strong>
+  You pay on Stripe's own page with a test card: <span class="nowrap">4242 4242 4242 4242</span>, any future expiry, any CVC. No real money moves.</div>
+{% endif %}
+{% if cancelled and order.status == "created" %}
+<div class="notice info">Payment was not completed. Nothing was charged; you can try again below.</div>
+{% endif %}
+{% if order.payment_status == "failed" and order.status == "created" %}
+<div class="notice error">The last payment attempt was declined. You can try again.</div>
+{% endif %}
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Item</th><th>SKU</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Total</th></tr></thead>
+      <tbody>
+        {% for item in order.items %}
+        <tr>
+          <td>{{ item.product_name }} ({{ item.size }}, {{ item.color }})</td>
+          <td class="muted">{{ item.sku }}</td>
+          <td class="num">{{ item.quantity }}</td>
+          <td class="num">{{ item.unit_price | inr }}</td>
+          <td class="num">{{ item.line_total | inr }}</td>
+        </tr>
+        {% endfor %}
+        <tr><td colspan="4" class="right"><strong>To pay</strong></td><td class="num"><strong>{{ order.total_amount | inr }}</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  {% if order.payment_status == "paid" %}
+    <div class="notice ok">Paid. Payment reference {{ order.stripe_payment_intent_id }}.</div>
+    <a class="button secondary" href="/orders/{{ order.id }}">View order</a>
+  {% elif order.status != "created" %}
+    <div class="notice error">This order is {{ order.status }} (payment {{ order.payment_status }}) and can no longer be paid.</div>
+    <a class="button secondary" href="/store">Back to store</a>
+  {% elif not is_owner %}
+    <p class="muted">Only the buyer can pay for this order.</p>
+  {% elif provider.is_mock %}
+    <div class="actions">
+      <button class="success" id="pay-ok">Pay {{ order.total_amount | inr }} (mock success)</button>
+      <button class="danger" id="pay-fail">Simulate a declined card</button>
+    </div>
+  {% else %}
+    <button class="success" id="pay-stripe">Pay {{ order.total_amount | inr }} with Stripe</button>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+{% if order.status == "created" and is_owner %}
+<script>
+  const merchOrderId = "{{ order.id }}";
+
+  // Step 1: the server opens the checkout session and fixes the amount.
+  async function openCheckout() {
+    return api("POST", "/api/v1/payments/stripe/create-checkout-session", { merch_order_id: merchOrderId });
+  }
+
+  async function mockPay(outcome, button) {
+    button.disabled = true;
+    try {
+      const checkout = await openCheckout();
+      // Step 2 (mock): stands in for the buyer on Stripe's checkout page.
+      await api("POST", "/api/v1/payments/mock/simulate", { session_id: checkout.session_id, outcome });
+      // Step 3: the order page asks the server to verify the session before showing it as paid.
+      window.location.href = "/orders/" + merchOrderId + "?session_id=" + encodeURIComponent(checkout.session_id);
+    } catch (error) {
+      showMessage(error.message);
+      button.disabled = false;
+    }
+  }
+
+  const ok = document.getElementById("pay-ok");
+  const fail = document.getElementById("pay-fail");
+  const real = document.getElementById("pay-stripe");
+  if (ok) ok.addEventListener("click", () => mockPay("success", ok));
+  if (fail) fail.addEventListener("click", () => mockPay("failure", fail));
+  if (real) real.addEventListener("click", async () => {
+    real.disabled = true;
+    try {
+      // Step 2: Stripe's hosted page takes the card. It sends the buyer back to the order page.
+      window.location.href = (await openCheckout()).checkout_url;
+    } catch (error) {
+      showMessage(error.message);
+      real.disabled = false;
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}

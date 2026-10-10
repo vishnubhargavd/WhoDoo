@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Treasurer dashboard · WhoDoo{% endblock %}
+{% block content %}
+<h1>Treasurer dashboard</h1>
+<p class="sub">Live totals from TrustLedger. Only paid entries move the balance.</p>
+
+<div class="grid">
+  <div class="card stat">
+    <div class="label">Current balance</div>
+    <div class="value {{ 'neg' if summary.current_balance < 0 else 'pos' }}">{{ summary.current_balance | inr }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Total income</div>
+    <div class="value">{{ summary.total_income | inr }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Total expenses</div>
+    <div class="value">{{ summary.total_expenses | inr }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Reimbursements paid</div>
+    <div class="value">{{ summary.total_reimbursements_paid | inr }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Reimbursements owed</div>
+    <div class="value">{{ summary.pending_reimbursements | inr }}</div>
+  </div>
+  <div class="card stat">
+    <div class="label">Refunds</div>
+    <div class="value">{{ summary.total_refunds | inr }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Event profit and loss</h2>
+  {% if event_results %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Event</th><th class="num">Tickets sold</th><th class="num">Ticket income</th>
+          <th class="num">Merch income</th><th class="num">Approved expenses</th>
+          <th class="num">Reimbursements paid</th><th class="num">Net</th><th>Result</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in event_results %}
+        <tr>
+          <td><a href="/treasurer/ledger?event_id={{ row.event_id }}">{{ row.event_name }}</a></td>
+          <td class="num">{{ row.tickets_sold }}</td>
+          <td class="num">{{ row.ticket_income | inr }}</td>
+          <td class="num">{{ row.merchandise_income | inr }}</td>
+          <td class="num">{{ row.approved_expenses | inr }}</td>
+          <td class="num">{{ row.paid_reimbursements | inr }}</td>
+          <td class="num {{ 'neg' if row.net_profit_loss < 0 else 'pos' }}">{{ row.net_profit_loss | inr }}</td>
+          <td><span class="badge {{ 'paid' if row.result == 'profit' else 'rejected' if row.result == 'loss' else '' }}">{{ row.result | label }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No events yet.</p>
+  {% endif %}
+</div>
+
+<div class="grid two">
+  <div class="card">
+    <h2>Income by source</h2>
+    <table>
+      {% for source, amount in summary.income_by_source.items() %}
+      <tr><td>{{ source | label }}</td><td class="num">{{ amount | inr }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>Expenses by category</h2>
+    <table>
+      {% for category, amount in summary.expenses_by_category.items() %}
+      <tr><td>{{ category | label }}</td><td class="num">{{ amount | inr }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Monthly trend</h2>
+  {% if summary.monthly_trend %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Month</th><th class="num">Money in</th><th></th><th class="num">Money out</th><th></th><th class="num">Net</th></tr></thead>
+      <tbody>
+        {% for point in summary.monthly_trend %}
+        <tr>
+          <td class="nowrap">{{ point.month }}</td>
+          <td class="num">{{ point.income | inr }}</td>
+          <td style="width: 18%"><div class="bar" style="width: {{ (point.income / trend_peak * 100) | round(1) }}%"></div></td>
+          <td class="num">{{ point.expenses | inr }}</td>
+          <td style="width: 18%"><div class="bar out" style="width: {{ (point.expenses / trend_peak * 100) | round(1) }}%"></div></td>
+          <td class="num {{ 'neg' if point.net < 0 else 'pos' }}">{{ point.net | inr }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">No paid entries yet.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="actions" style="justify-content: space-between">
+    <h2>Latest ledger entries</h2>
+    <a href="/treasurer/ledger">View full ledger</a>
+  </div>
+  {% set entries = recent %}
+  {% include "_ledger_table.html" %}
+</div>
+{% endblock %}

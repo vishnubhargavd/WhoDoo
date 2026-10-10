@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ status_code }} · WhoDoo{% endblock %}
+{% block content %}
+<div class="signin" style="padding-top: 24px">
+  <p class="mega" aria-hidden="true">{{ status_code }}</p>
+  <h1 style="font-size: clamp(2rem, 5vw, 3.5rem)">{{ status_code }} — {{ code | label }}</h1>
+  <p class="sub" style="margin: 0 auto">{{ message }}</p>
+  <div class="actions" style="justify-content: center">
+    <a class="button" href="{{ '/home' if user else '/' }}">Back to home</a>
+    {% if not user %}<a class="button secondary" href="/login">Sign in</a>{% endif %}
+  </div>
+</div>
+{% endblock %}

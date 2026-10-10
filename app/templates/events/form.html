@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit " ~ event.name if event else "New event" }} · WhoDoo{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/events.css">
+<h1>{{ "Edit event" if event else "New event" }}</h1>
+<p class="sub">{% if event %}Changes are saved to the club calendar straight away.{% else %}New events start as drafts. Publish when the details are final.{% endif %} Times are in IST.</p>
+
+<div class="card">
+  <form class="stack" data-api="{{ 'PATCH' if event else 'POST' }}"
+        action="/api/v1/events{{ '/' ~ event.id if event else '' }}"
+        data-next="{{ '/events/' ~ event.id if event else '/events' }}">
+    <label>Title
+      <input type="text" name="name" minlength="3" maxlength="120" required value="{{ event.name if event else '' }}"
+             placeholder="e.g. Spring Gala">
+    </label>
+    <label>Description
+      <textarea name="description" maxlength="2000" placeholder="What is it, and who is it for?">{{ (event.description or '') if event else '' }}</textarea>
+    </label>
+    <div class="fields">
+      <label>Starts <input type="datetime-local" name="starts_at" required value="{{ event.starts_at | ist_input if event else '' }}"></label>
+      <label>Ends <input type="datetime-local" name="ends_at" required value="{{ event.ends_at | ist_input if event else '' }}"></label>
+      <label>Venue <input type="text" name="venue" maxlength="120" value="{{ (event.venue or '') if event else '' }}" placeholder="e.g. Main Hall"></label>
+      {% if user.role == "president" %}
+      <label>Event lead
+        <select name="lead_id">
+          <option value="">Choose a lead</option>
+          {% for lead in leads %}
+          <option value="{{ lead.id }}" {% if event and event.lead_id == lead.id %}selected{% endif %}>{{ lead.full_name }} ({{ lead.role | label }})</option>
+          {% endfor %}
+        </select>
+      </label>
+      {% endif %}
+    </div>
+    {% if user.role != "president" %}<p class="muted">You will lead this event. Only the president can hand it to someone else.</p>{% endif %}
+    <div class="actions">
+      <button type="submit">{{ "Save changes" if event else "Create draft" }}</button>
+      <a href="{{ '/events/' ~ event.id if event else '/events' }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

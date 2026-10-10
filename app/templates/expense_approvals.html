@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Expense approvals · WhoDoo{% endblock %}
+{% macro claim_table(claims, empty_text) %}
+  {% if claims %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Submitted</th><th>Claim</th><th>By</th><th>Event</th><th>Stage</th><th class="num">Amount</th><th></th></tr></thead>
+      <tbody>
+        {% for claim in claims %}
+        <tr>
+          <td class="nowrap">{{ claim.created_at | nice_date }}</td>
+          <td><a href="/expenses/{{ claim.id }}">{{ claim.title }}</a><br><span class="muted">{{ claim.category | label }}{% if claim.vendor_name %} · {{ claim.vendor_name }}{% endif %}</span></td>
+          <td>{{ claim.submitted_by_name }}</td>
+          <td>{{ claim.event_name or "—" }}</td>
+          <td>
+            {% if claim.status == "approved" %}<span class="badge approved">Approved</span>
+            {% elif claim.approval_stage == "final" %}<span class="badge final">Final approval</span>
+              <br><span class="muted">First: {{ claim.first_approved_by_name }}</span>
+            {% elif claim.needs_final_approval %}<span class="badge pending">First of two</span>
+            {% else %}<span class="badge pending">Single approval</span>{% endif %}
+          </td>
+          <td class="num">{{ claim.amount | inr }}</td>
+          <td>{% include "_claim_actions.html" %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="empty">{{ empty_text }}</p>
+  {% endif %}
+{% endmacro %}
+{% block content %}
+<h1>Expense approvals</h1>
+<p class="sub">Claims waiting for your decision. You never see your own claims here.</p>
+
+<div class="card">
+  <h2>Waiting for your approval ({{ queue.to_approve | length }})</h2>
+  {{ claim_table(queue.to_approve, "Nothing is waiting for you.") }}
+</div>
+
+{% if queue.awaiting_others %}
+<div class="card">
+  <h2>You gave the first approval ({{ queue.awaiting_others | length }})</h2>
+  <p class="muted">These need a final approval from a different treasurer or president. You cannot approve them again,
+    but you can still reject one or send it back.</p>
+  {{ claim_table(queue.awaiting_others, "") }}
+</div>
+{% endif %}
+
+{% if user.role in ("treasurer", "president") %}
+<div class="card">
+  <h2>Approved, waiting to be paid ({{ queue.to_pay | length }})</h2>
+  {{ claim_table(queue.to_pay, "No approved claims are waiting for payment.") }}
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script>watchForChanges("/api/v1/expenses/approvals");</script>{% endblock %}

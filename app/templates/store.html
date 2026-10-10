@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Store · WhoDoo{% endblock %}
+{% block content %}
+<h1>Club store</h1>
+<p class="sub">
+  {% if user.is_active_member %}You are an active member, so member prices apply.
+  {% else %}Active members pay the member price.{% endif %}
+</p>
+
+{% if products %}
+<div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(230px, 1fr))">
+  {% for product in products %}
+  <a class="card product" href="/store/{{ product.id }}" style="color: inherit; text-decoration: none">
+    {% if product.image_url %}<img src="{{ product.image_url }}" alt="{{ product.name }}">
+    {% else %}<div class="noimg">{{ product.name[0] }}</div>{% endif %}
+    <h2 style="margin-top: 10px">{{ product.name }}</h2>
+    <div class="price">
+      {{ product.your_price | inr }}
+      {% if product.member_pricing_applied and product.member_price < product.base_price %}
+        <span class="strike">{{ product.base_price | inr }}</span>
+      {% endif %}
+    </div>
+    {% set left = product.variants | sum(attribute="stock_quantity") %}
+    <span class="badge {{ 'paid' if left > 0 else 'cancelled' }}">{{ left ~ " in stock" if left > 0 else "Sold out" }}</span>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card"><p class="empty">Nothing is on sale right now.</p></div>
+{% endif %}
+{% endblock %}

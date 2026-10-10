@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>WhoDoo — Who does what? WhoDoo knows.</title>
+  <meta name="description" content="WhoDoo runs student organizations: events, volunteers, finances, reimbursements, merchandise and more.">
+{% include "_head.html" %}
+</head>
+<body>
+<main class="frame" id="top">
+  <div class="ticker" role="marquee" aria-label="WhoDoo is live. Your campus. One platform.">
+    <div class="ticker-track" aria-hidden="true">
+      {% for copy in range(2) %}
+      <ul>{% for n in range(6) %}<li>WhoDoo is live</li><li>Your campus. One platform.</li>{% endfor %}</ul>
+      {% endfor %}
+    </div>
+  </div>
+
+  <section class="hero" data-parallax>
+    <div class="hero-bg" aria-hidden="true"></div>
+
+    <header class="hero-nav">
+      <button type="button" class="brand-mark" data-replay aria-label="WhoDoo home, replay intro"><span aria-hidden="true">W</span></button>
+      {% include "_menu.html" %}
+    </header>
+
+    <div class="hero-body">
+      <div class="hero-title-wrap">
+        <h1 class="hero-title">
+          <span class="sr-only">WhoDoo</span>
+          <span aria-hidden="true" class="settle">WhoDoo</span>
+          {# Nine strips of the same word slide in from alternating sides and lock together. #}
+          {% set offsets = (-38, 26, -14, 44, -30, 18, -46, 34, -22) %}
+          {% for i in range(9) %}
+          {% set top = [i * 11.111 - 0.6, 0] | max %}
+          {% set bottom = [100 - (i + 1) * 11.111 - 0.6, 0] | max %}
+          <span aria-hidden="true" class="slice" style="clip-path: inset({{ '%.3f' | format(top) }}% -2% {{ '%.3f' | format(bottom) }}% -2%); --sx: {{ offsets[i] }}%; --sy: {{ -6 if i % 2 == 0 else 6 }}%; --d: {{ '%.3f' | format(0.25 + (i % 3) * 0.07 + i * 0.035) }}s">WhoDoo</span>
+          {% endfor %}
+        </h1>
+        <div class="sticker" style="top: -34%; left: -8%; width: 14%; --depth: -26"><span style="--d: 1s; --rot: -8deg"><img src="/static/brand/rocket.webp" alt="" width="493" height="512" style="--bob: 5.5s; --d: 1s"></span></div>
+        <div class="sticker" style="top: 10%; left: 55%; width: 11%; --depth: 20"><span style="--d: 1.15s; --rot: 8deg"><img src="/static/brand/smiley.webp" alt="" width="482" height="512" style="--bob: 4.2s; --d: 1.15s"></span></div>
+        <div class="sticker" style="bottom: -30%; left: -5%; width: 12%; --depth: 32"><span style="--d: 1.3s; --rot: -10deg"><img src="/static/brand/coin-w.webp" alt="" width="512" height="510" style="--bob: 6.4s; --d: 1.3s"></span></div>
+        <div class="sticker" style="top: 42%; right: -8%; width: 15%; --depth: -18"><span style="--d: 1.45s; --rot: -14deg"><img src="/static/brand/wallet.webp" alt="" width="512" height="499" style="--bob: 4.8s; --d: 1.45s"></span></div>
+      </div>
+
+      <p class="hero-sub">
+        {% for word in ("Who", "does", "what?", "WhoDoo", "knows.") %}
+        <span><i style="--d: {{ '%.2f' | format(1.1 + loop.index0 * 0.08) }}s">{{ word }}</i></span>
+        {% endfor %}
+      </p>
+
+      <div class="hero-cta">
+        <a class="pill" data-magnetic href="{{ '/home' if user else '/login' }}">{{ "Open my WhoDoo" if user else "Enter WhoDoo" }}</a>
+        <a class="pill" data-magnetic href="#features">Explore features
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="features" aria-labelledby="features-title">
+    <div class="section-inner">
+      <div class="section-head">
+        <h2 id="features-title" class="mega reveal">Twelve tools.<br>One campus.</h2>
+        <p class="lead reveal">Memberships, tickets, attendance, volunteers, money and more, all run from one place for every
+          student organization. The tools marked live are running in this build.</p>
+      </div>
+
+      <ul class="tiles">
+        {% set accents = ("", "mint", "butter", "cobalt") %}
+        {% for feature in features %}
+        <li id="{{ feature.id }}" class="reveal" style="--i: {{ loop.index0 % 3 }}; scroll-margin-top: 24px">
+          {% if feature.href %}<a class="card tile" href="{{ feature.href if user else '/login?next=' ~ feature.href }}">
+          {% else %}<article class="card tile">{% endif %}
+            <div class="tile-top">
+              <span class="tile-num"><span class="dot {{ accents[loop.index0 % 4] }}" aria-hidden="true"></span>{{ "%02d" | format(loop.index) }}</span>
+              <span class="tag">{{ feature.category }}</span>
+            </div>
+            <div class="tile-body">
+              <h3>{{ feature.name }}</h3>
+              <p>{{ feature.description }}</p>
+              <p><span class="tag {{ 'live' if feature.href else 'soon' }}">{{ "Live — open it" if feature.href else "Coming soon" }}</span></p>
+            </div>
+          {% if feature.href %}</a>{% else %}</article>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+
+      <div class="cta-band reveal">
+        <p>Who does what?<br>WhoDoo knows.</p>
+        <div class="actions">
+          <a class="pill" data-magnetic href="{{ '/home' if user else '/login' }}">{{ "Open my WhoDoo" if user else "Enter WhoDoo" }}</a>
+          <a href="#top" style="font-weight: 600; text-transform: uppercase; padding: 14px 20px">Back to top ↑</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

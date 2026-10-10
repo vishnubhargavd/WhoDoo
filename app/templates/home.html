@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Home · WhoDoo{% endblock %}
+{% block content %}
+<h1>Hey {{ user.full_name.split(" ")[0] }}.</h1>
+<p class="sub">Here is what needs you today across {{ club_name or "your club" }}.</p>
+
+<ul class="tiles">
+  {% set accents = ("", "mint", "butter", "cobalt") %}
+  {% for tile in tiles %}
+  <li class="reveal" style="--i: {{ loop.index0 % 3 }}">
+    <a class="card tile" href="{{ tile.href }}">
+      <div class="tile-top">
+        <span class="tile-num"><span class="dot {{ accents[loop.index0 % 4] }}" aria-hidden="true"></span>{{ tile.module }}</span>
+        <span class="tag">{{ tile.tag }}</span>
+      </div>
+      <div class="tile-body">
+        <div class="figure">{{ tile.figure }}</div>
+        <h3 style="font-size: 1.5rem; margin-top: 6px">{{ tile.title }}</h3>
+        <p>{{ tile.detail }}</p>
+      </div>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endblock %}

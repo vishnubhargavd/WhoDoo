@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Order {{ order.order_number }} · WhoDoo{% endblock %}
+{% block content %}
+<h1>Order {{ order.order_number }}</h1>
+<p class="sub">Placed {{ order.created_at | nice_date }}{% if not is_owner and order.user_name %} by {{ order.user_name }}{% endif %}</p>
+
+{% if problem %}
+<div class="notice error"><strong>{{ problem.message }}</strong></div>
+{% elif just_paid %}
+<div class="notice ok"><strong>Payment received.</strong> Thank you. Your order is confirmed.</div>
+{% endif %}
+
+<div class="card">
+  <p>
+    Payment <span class="badge {{ order.payment_status }}">{{ order.payment_status | label }}</span>
+    Order <span class="badge {{ order.status }}">{{ order.status | label }}</span>
+  </p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Item</th><th>SKU</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Total</th></tr></thead>
+      <tbody>
+        {% for item in order.items %}
+        <tr>
+          <td>{{ item.product_name }} ({{ item.size }}, {{ item.color }})</td>
+          <td class="muted">{{ item.sku }}</td>
+          <td class="num">{{ item.quantity }}</td>
+          <td class="num">{{ item.unit_price | inr }}</td>
+          <td class="num">{{ item.line_total | inr }}</td>
+        </tr>
+        {% endfor %}
+        <tr><td colspan="4" class="right"><strong>{{ "Total paid" if order.payment_status == "paid" else "Total" }}</strong></td><td class="num"><strong>{{ order.total_amount | inr }}</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  {% if order.stripe_payment_intent_id %}
+  <p class="muted">Payment reference {{ order.stripe_payment_intent_id }}{% if mock_payments %} · Mock Payment (Stripe-compatible){% endif %}</p>
+  {% endif %}
+  {% if order.payment_status == "refunded" %}
+  <p class="muted">The full amount of {{ order.total_amount | inr }} was refunded to the original payment method.</p>
+  {% endif %}
+</div>
+
+<div class="actions">
+  {% if order.status == "created" and is_owner %}<a class="button" href="/checkout/{{ order.id }}">Pay now</a>{% endif %}
+  <a class="button secondary" href="/orders">My orders</a>
+  <a class="button secondary" href="/store">Back to store</a>
+</div>
+{% endblock %}

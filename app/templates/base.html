@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>{% block title %}WhoDoo{% endblock %}</title>
+{% include "_head.html" %}
+</head>
+<body{% if user %} data-user-id="{{ user.id }}" data-user-name="{{ user.full_name }}"{% endif %}>
+<div class="frame">
+  <div class="panel">
+    <header class="topbar">
+      <a class="brand" href="{{ '/home' if user else '/' }}" aria-label="WhoDoo home">
+        <span class="brand-mark" aria-hidden="true"><span>W</span></span>
+        <span class="brand-name">WhoDoo</span>
+      </a>
+      {% if user %}
+      <nav class="sections" aria-label="Sections">
+        <a href="/home" class="{{ 'active' if path == '/home' }}" {% if path == '/home' %}aria-current="page"{% endif %}>Home</a>
+        {% for section in nav.sections %}
+        <a href="{{ section.href }}" class="{{ 'active' if section.active }}"
+           {% if section.active %}aria-current="true"{% endif %}>{{ section.title }}</a>
+        {% endfor %}
+      </nav>
+      {% else %}
+      <span class="spacer"></span>
+      {% endif %}
+      {% if user %}
+      <span class="who">
+        <strong>{{ user.full_name }}</strong>
+        {{ user.role | label }}{% if user.is_active_member %} · member{% endif %}
+        {% if demo_auth %} · <a href="/logout">Switch user</a>{% endif %}
+      </span>
+      {% endif %}
+      {% include "_menu.html" %}
+    </header>
+
+    {% if nav.current and nav.current.links | length > 1 %}
+    <nav class="subnav" aria-label="{{ nav.current.title }}">
+      {% for link in nav.current.links %}
+      <a href="{{ link.href }}" class="{{ 'active' if link.active }}" {% if link.active %}aria-current="page"{% endif %}>{{ link.label }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
+
+    <main class="container">
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <footer class="footer">
+    <span>WhoDoo · Who does what? WhoDoo knows.</span>
+    <span>{% if mock_payments %}Payments: mock mode{% endif %}{% if demo_auth %}{{ " · " if mock_payments }}Demo sign-in{% endif %}</span>
+  </footer>
+</div>
+<div id="flash" class="notice error" role="status" aria-live="polite" hidden></div>
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

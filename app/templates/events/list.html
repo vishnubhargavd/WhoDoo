@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Events · WhoDoo{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/events.css">
+<div class="actions" style="justify-content: space-between">
+  <div>
+    <h1>Events</h1>
+    <p class="sub">Everything your club is planning, with who is responsible and how ready it is.</p>
+  </div>
+  {% if can_create %}<a class="button" href="/events/new">New event</a>{% endif %}
+</div>
+
+<nav class="tabs" aria-label="Event lists">
+  <a href="/events" class="{{ 'active' if scope == 'upcoming' }}" {% if scope == 'upcoming' %}aria-current="page"{% endif %}>Upcoming</a>
+  <a href="/events?scope=past" class="{{ 'active' if scope == 'past' }}" {% if scope == 'past' %}aria-current="page"{% endif %}>Past and cancelled</a>
+</nav>
+
+{% for event in events %}
+<article class="card">
+  <div class="event-row">
+    <div>
+      <h2><a href="/events/{{ event.id }}">{{ event.name }}</a> <span class="badge {{ event.status }}">{{ event.status | label }}</span></h2>
+      <div class="meta">
+        <span>{{ event.starts_at | ist }}{% if event.ends_at %} – {{ event.ends_at | ist('%H:%M') }}{% endif %}{% if event.starts_at %} IST{% endif %}</span>
+        <span>{{ event.venue or "No venue yet" }}</span>
+        <span>Lead: {{ event.lead_name or "unassigned" }}</span>
+      </div>
+    </div>
+    {% set p = event.progress %}
+    <div style="min-width: 180px">
+      {% if p.total %}
+      <div class="meta"><span>{{ p.done }}/{{ p.total }} tasks done</span>
+        {% if p.at_risk %}<span class="badge at_risk">{{ p.at_risk }} at risk</span>{% endif %}</div>
+      <div class="progress" role="progressbar" aria-valuenow="{{ p.percent_done }}" aria-valuemin="0" aria-valuemax="100" aria-label="Tasks done">
+        <span style="width: {{ p.percent_done }}%"></span>
+      </div>
+      {% else %}
+      <div class="meta">No tasks yet</div>
+      {% endif %}
+    </div>
+  </div>
+</article>
+{% else %}
+<div class="card"><p class="empty">
+  {% if scope == 'upcoming' %}No upcoming events.{% if can_create %} <a href="/events/new">Create the first one.</a>{% endif %}
+  {% else %}No past or cancelled events yet.{% endif %}
+</p></div>
+{% endfor %}
+{% endblock %}

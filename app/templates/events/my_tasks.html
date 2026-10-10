@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}My tasks · WhoDoo{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="/static/events.css">
+<h1>My tasks</h1>
+<p class="sub">What you have signed up for. Stuck? Report a blocker so the event lead sees it straight away.</p>
+
+{% if tasks %}
+<div class="grid" aria-label="Task summary">
+  <div class="card stat"><div class="label">Pending</div><div class="value">{{ tasks | selectattr("status", "equalto", "todo") | list | length }}</div></div>
+  <div class="card stat"><div class="label">In progress</div><div class="value">{{ tasks | selectattr("status", "equalto", "in_progress") | list | length }}</div></div>
+  <div class="card stat"><div class="label">Blocked</div><div class="value {{ 'neg' if tasks | selectattr('status', 'equalto', 'blocked') | list }}">{{ tasks | selectattr("status", "equalto", "blocked") | list | length }}</div></div>
+  <div class="card stat"><div class="label">Completed</div><div class="value pos">{{ tasks | selectattr("status", "equalto", "done") | list | length }}</div></div>
+</div>
+{% endif %}
+
+{% for t in tasks %}
+<article class="card {{ 'risk-row' if t.risks }}">
+  <div class="event-row">
+    <div>
+      <h2>{{ t.title }}
+        <span class="badge {{ t.status }}">{{ t.status | label }}</span>
+        {% if t.is_critical %}<span class="badge critical">Critical</span>{% endif %}
+        {% for r in t.risks if r not in ("unassigned", "blocked") %}<span class="badge at_risk">{{ {"blocked": "Blocked", "overdue": "Overdue", "critical_due_soon": "Event soon"}[r] }}</span>{% endfor %}
+      </h2>
+      <div class="meta">
+        <span><a href="/events/{{ t.event_id }}">{{ t.event_name }}</a> · {{ t.event_starts_at | ist('%d %b, %H:%M') }}</span>
+        <span>Due: {{ t.due_at | ist('%d %b, %H:%M') }}</span>
+        <span>Priority: {{ t.priority | label }}</span>
+      </div>
+      {% if t.description %}<p class="muted" style="margin: 6px 0 0">{{ t.description }}</p>{% endif %}
+      {% if t.blocker_note %}<div class="blocker">Blocker: {{ t.blocker_note }}</div>{% endif %}
+    </div>
+    {% if t.can_update_status %}
+    <div class="actions">
+      {% if t.status == "todo" %}<button class="small" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "in_progress"}'>Start</button>{% endif %}
+      {% if t.status == "blocked" %}<button class="small secondary" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "in_progress"}'>Unblocked</button>{% endif %}
+      {% if t.status != "done" %}
+        <button class="small danger" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "blocked"}'
+                data-prompt="What is blocking you?" data-field="blocker_note" data-required>Report blocker</button>
+        <button class="small success" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "done"}'>Mark done</button>
+      {% else %}
+        <button class="small secondary" data-post="/api/v1/tasks/{{ t.id }}/status" data-body='{"status": "in_progress"}'>Reopen</button>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</article>
+{% else %}
+<div class="card"><p class="empty">No tasks assigned to you right now. <a href="/events">Browse events</a>.</p></div>
+{% endfor %}
+{% endblock %}
