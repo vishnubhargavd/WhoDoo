@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, LargeBinary, SmallInteger, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -35,9 +35,14 @@ class TicketCategory(Base):
     base_price_paise: Mapped[int] = mapped_column(BigInteger)
     pricing_version: Mapped[int] = mapped_column(Integer, default=1)
     capacity: Mapped[int] = mapped_column(Integer)
-    sales_open_at: Mapped[datetime] = _moment()
-    sales_close_at: Mapped[datetime] = _moment()
+    # The category's own sales window. None means the event's window (event_ticket_settings).
+    sales_open_at: Mapped[datetime | None] = _moment(nullable=True)
+    sales_close_at: Mapped[datetime | None] = _moment(nullable=True)
+    # "Visible" on the event side: a hidden category is paused, not deleted, and keeps its seats.
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    description: Mapped[str | None] = mapped_column(Text)
+    member_discount_eligible: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(SmallInteger, default=0)
     created_by: Mapped[uuid.UUID] = _ref("users.id")
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()

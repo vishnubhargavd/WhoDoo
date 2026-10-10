@@ -32,28 +32,29 @@ from app.models.shared import Club, Event, User  # noqa: E402
 
 @pytest.fixture(scope="session", autouse=True)
 async def _schema():
-    url = get_settings().database_url
-    assert "test" in url.rsplit("/", 1)[-1], f"Refusing to reset a non-test database: {url}"
-    await run_migrations(asyncpg_dsn(url), reset=True)
-
-
-@pytest.fixture(scope="session")
-async def fairseat_schema(_schema):
-    """FairSeat's tables are still a pending migration: `make migrate` does not apply it.
-    Tests add it to the disposable test database, on top of the real migrations."""
+    """Rebuild the disposable test database: the real migrations, then the pending FairSeat
+    ones, which `make migrate` does not apply anywhere else."""
     import asyncpg
 
     from app.db.migrate import MIGRATIONS_DIR
 
     url = get_settings().database_url
-    assert "test" in url.rsplit("/", 1)[-1] and get_settings().database_is_local, f"Not a local test database: {url}"
+    assert "test" in url.rsplit("/", 1)[-1], f"Refusing to reset a non-test database: {url}"
+    assert get_settings().database_is_local, f"Refusing to reset a database that is not local: {url}"
+    await run_migrations(asyncpg_dsn(url), reset=True)
     conn = await asyncpg.connect(asyncpg_dsn(url))
     try:
-        if await conn.fetchval("SELECT to_regclass('public.ticket_categories')") is None:
+        for path in sorted((MIGRATIONS_DIR / "pending").glob("*.sql")):
             async with conn.transaction():
-                await conn.execute((MIGRATIONS_DIR / "pending" / "020_fairseat.sql").read_text())
+                await conn.execute(path.read_text())
+                await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", f"pending/{path.name}")
     finally:
         await conn.close()
+
+
+@pytest.fixture(scope="session")
+async def fairseat_schema(_schema):
+    """Kept for the FairSeat tests that ask for it by name; `_schema` does the work."""
 
 
 @pytest.fixture
