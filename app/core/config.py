@@ -9,7 +9,7 @@ DEFAULT_JWT_SECRET = "dev-only-change-me"
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    app_name: str = "WhoDoo Finance"
+    app_name: str = "WhoDoo"
 
     database_url: str = "postgresql+asyncpg://localhost/whodoo"
     db_null_pool: bool = False

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Submit expense · WhoDoo Finance{% endblock %}
+{% block title %}Submit expense · WhoDoo{% endblock %}
 {% block content %}
 <h1>Submit an expense</h1>
-<p class="sub">Upload the receipt, check what we read from it, then submit. Claims of {{ approval_limit | inr }} or more need two approvals.</p>
+<p class="sub">Upload the receipt, check what we read from it, correct anything that is wrong, then submit. Nothing is claimed until you submit. Claims of {{ approval_limit | inr }} or more also need the treasurer or president to approve.</p>
 
 <div class="grid two">
   <div class="card">
@@ -16,9 +16,25 @@
         <span class="muted">PNG, JPEG, WebP or PDF, up to 8 MB.</span>
       </div>
       <div id="ocr-status" class="notice info" hidden></div>
+      <div id="ocr-warnings" class="notice info" hidden></div>
+      <div id="ocr-evidence" hidden>
+        <h2 style="margin-top: 4px">What we read from the receipt</h2>
+        <dl class="kv" style="margin-bottom: 10px">
+          <dt>Merchant</dt><dd id="read-vendor">—</dd>
+          <dt>Date</dt><dd id="read-date">—</dd>
+        </dl>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead>
+            <tbody id="read-items"></tbody>
+          </table>
+        </div>
+        <p class="muted" id="read-confidence"></p>
+      </div>
       <img id="receipt-preview" class="receipt" alt="Receipt preview" hidden>
-      <p class="muted">No receipt handy? Try the <a href="/static/samples/receipt_bake_sale_850.png" download>₹850 sample</a>
-        or the <a href="/static/samples/receipt_stage_decor_2500.png" download>₹2,500 sample</a>.</p>
+      <p class="muted">No receipt handy? Try the <a href="/static/samples/receipt_bake_sale_850.png" download>₹850 sample</a>,
+        the <a href="/static/samples/receipt_stage_decor_2500.png" download>₹2,500 sample</a>
+        or the <a href="/static/samples/receipt_grocery_6_items_968.png" download>six-item ₹968 sample</a>.</p>
     </div>
   </div>
 
@@ -28,7 +44,8 @@
       <input type="hidden" name="receipt_id">
       <label>Title <input type="text" name="title" minlength="3" maxlength="120" required placeholder="e.g. Bake sale supplies"></label>
       <div class="fields">
-        <label>Amount (₹) <input type="number" name="amount" min="0.01" step="0.01" required></label>
+        <label>Total amount (₹) <input type="number" name="amount" min="0.01" step="0.01" required>
+          <span id="amount-hint" class="muted"></span></label>
         <label>Date of expense <input type="date" name="expense_date" required></label>
         <label>Category
           <select name="category" required>
@@ -56,9 +73,69 @@
 <script>
   const fileInput = document.getElementById("receipt-file");
   const statusBox = document.getElementById("ocr-status");
+  const warningBox = document.getElementById("ocr-warnings");
+  const evidence = document.getElementById("ocr-evidence");
   const preview = document.getElementById("receipt-preview");
   const form = document.getElementById("claim-form");
   const submitButton = document.getElementById("submit-claim");
+  const amountHint = document.getElementById("amount-hint");
+  const rupees = (value) => value === null || value === undefined ? "—"
+    : "₹" + Number(value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Fill a field from the receipt unless the user has typed their own value there.
+  // A value we filled earlier (from a previous receipt) is replaced, so nothing stale is left behind.
+  function fill(field, value) {
+    const typedByUser = field.value !== "" && field.dataset.filled !== field.value;
+    if (typedByUser) return;
+    field.value = value === null || value === undefined ? "" : value;
+    field.dataset.filled = field.value;
+  }
+
+  function cell(text, numeric) {
+    const td = document.createElement("td");
+    td.textContent = text;
+    if (numeric) td.className = "num";
+    return td;
+  }
+
+  function summaryRow(label, value, strong) {
+    const row = document.createElement("tr");
+    if (strong) row.className = "total-row";
+    const name = cell(label);
+    name.colSpan = 3;
+    name.className = "right";
+    row.append(name, cell(value, true));
+    return row;
+  }
+
+  function showEvidence(result) {
+    document.getElementById("read-vendor").textContent = result.extracted_vendor || "Not read — please enter it";
+    document.getElementById("read-date").textContent = result.extracted_date || "Not read — please enter it";
+    const body = document.getElementById("read-items");
+    body.replaceChildren();
+    for (const item of result.line_items) {
+      const row = document.createElement("tr");
+      row.append(cell(item.description), cell(item.quantity ?? "—", true),
+                 cell(rupees(item.unit_price), true), cell(rupees(item.amount), true));
+      body.append(row);
+    }
+    if (!result.line_items.length) {
+      const row = document.createElement("tr");
+      const empty = cell("No individual item lines could be read.");
+      empty.colSpan = 4;
+      empty.className = "muted";
+      row.append(empty);
+      body.append(row);
+    }
+    if (result.subtotal !== null) body.append(summaryRow("Subtotal", rupees(result.subtotal)));
+    if (result.discount_total !== null) body.append(summaryRow("Discount", "−" + rupees(result.discount_total)));
+    if (result.tax_total !== null) body.append(summaryRow("Tax", rupees(result.tax_total)));
+    body.append(summaryRow("Total on receipt",
+      result.extracted_amount !== null ? rupees(result.extracted_amount) : "Not read — please enter it", true));
+    document.getElementById("read-confidence").textContent =
+      `Text clarity reported by the OCR engine: ${Math.round(result.ocr_confidence)}%. This is not a guarantee the fields are right.`;
+    evidence.hidden = false;
+  }
 
   document.getElementById("read-receipt").addEventListener("click", async (event) => {
     if (!fileInput.files.length) { showMessage("Choose a receipt file first."); return; }
@@ -67,20 +144,46 @@
     statusBox.hidden = false;
     statusBox.className = "notice info";
     statusBox.textContent = "Reading the receipt…";
+    warningBox.hidden = true;
+    evidence.hidden = true;
     try {
       const body = new FormData();
       body.append("file", fileInput.files[0]);
       const result = await api("POST", "/api/v1/expenses/ocr", body);
 
       form.receipt_id.value = result.receipt_id;
-      // Only fill what OCR found, and never overwrite something already typed.
-      if (result.extracted_amount && !form.amount.value) form.amount.value = result.extracted_amount.toFixed(2);
-      if (result.extracted_date && !form.expense_date.value) form.expense_date.value = result.extracted_date;
-      if (result.extracted_vendor && !form.vendor_name.value) form.vendor_name.value = result.extracted_vendor;
+      fill(form.vendor_name, result.extracted_vendor);
+      fill(form.expense_date, result.extracted_date);
+      // The amount is only pre-filled from the receipt's own total line, never from an item price.
+      fill(form.amount, result.extracted_amount !== null ? result.extracted_amount.toFixed(2) : null);
+      fill(form.title, result.extracted_vendor ? result.extracted_vendor + " purchase" : null);
 
-      statusBox.className = "notice " + (result.ocr_available ? "ok" : "info");
-      statusBox.textContent = result.message +
-        (result.ocr_available ? ` OCR confidence: ${Math.round(result.ocr_confidence)}%.` : "");
+      amountHint.replaceChildren();
+      if (result.extracted_amount !== null) {
+        amountHint.textContent = "Read from the receipt's total line. Check it.";
+      } else if (result.suggested_amount !== null) {
+        amountHint.textContent = "Total not read. The readable lines add up to " + rupees(result.suggested_amount) + ". ";
+        const use = document.createElement("button");
+        use.type = "button";
+        use.className = "small secondary";
+        use.textContent = "Use this amount";
+        use.addEventListener("click", () => { form.amount.value = result.suggested_amount.toFixed(2); });
+        amountHint.append(use);
+      } else {
+        amountHint.textContent = "Total not read. Enter it from the receipt.";
+      }
+
+      statusBox.className = "notice " + (result.ocr_available && result.amount_status === "read_from_total_line" ? "ok" : "info");
+      statusBox.textContent = result.message;
+      if (result.warnings.length) {
+        warningBox.replaceChildren(...result.warnings.map((text) => {
+          const line = document.createElement("div");
+          line.textContent = "• " + text;
+          return line;
+        }));
+        warningBox.hidden = false;
+      }
+      if (result.ocr_available) showEvidence(result);
       if (/\.(png|jpe?g|webp)(\?|$)/i.test(result.receipt_url)) {
         preview.src = result.receipt_url;
         preview.hidden = false;
@@ -88,7 +191,7 @@
         preview.hidden = true;
       }
       submitButton.disabled = false;
-      document.getElementById("submit-hint").textContent = "Check the details, then submit.";
+      document.getElementById("submit-hint").textContent = "Check the details against the receipt, then submit.";
       document.getElementById("flash").hidden = true;
     } catch (error) {
       statusBox.hidden = true;
@@ -103,6 +206,7 @@
     submitButton.disabled = true;
     try {
       const claim = await api("POST", "/api/v1/expenses", formToJson(form));
+      sessionStorage.setItem("flash", `${claim.title}: ${claim.status_label}.`);
       window.location.href = "/expenses/" + claim.id;
     } catch (error) {
       showMessage(error.message);

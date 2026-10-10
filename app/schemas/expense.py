@@ -11,16 +11,42 @@ ClaimStatus = Literal["draft", "pending_approval", "approved", "rejected", "chan
 ClaimAction = Literal["approve", "reject", "request_changes", "mark_paid", "resubmit"]
 
 
+class OcrLineItem(BaseModel):
+    description: str
+    quantity: float | None = None
+    unit_price: Money | None = None
+    amount: Money = Field(description="The line's amount as printed on the receipt")
+
+
 class OcrResponse(BaseModel):
-    """Result of uploading a receipt. Nothing is claimed yet: pass `receipt_id` to POST /expenses."""
+    """Result of uploading a receipt. Nothing is claimed yet: pass `receipt_id` to POST /expenses.
+
+    Every `extracted_*` value is a reading for the user to confirm, and is null when it could
+    not be read. `extracted_amount` is only ever the figure on the receipt's total line.
+    """
 
     receipt_id: uuid.UUID
     receipt_url: str
     ocr_available: bool = Field(description="False when OCR could not read the file; enter the fields by hand")
-    ocr_confidence: float = Field(description="Mean word confidence from the OCR engine, 0 to 100")
+    ocr_confidence: float = Field(
+        description="Tesseract's mean word confidence for the text it read, 0 to 100. "
+        "It measures how clearly the characters were read, not whether the fields are right."
+    )
     extracted_vendor: str | None
-    extracted_amount: Money | None
+    extracted_amount: Money | None = Field(description="Final total from the receipt's total line, else null")
     extracted_date: date | None
+    amount_status: Literal["read_from_total_line", "not_found"]
+    suggested_amount: Money | None = Field(
+        default=None,
+        description="Offered only when the total could not be read: what the readable lines add up to. "
+        "Never applied without the user choosing it.",
+    )
+    line_items: list[OcrLineItem] = []
+    items_total: Money | None = None
+    subtotal: Money | None = None
+    tax_total: Money | None = None
+    discount_total: Money | None = None
+    warnings: list[str] = []
     message: str
 
 
@@ -119,6 +145,8 @@ class ExpenseClaimOut(ORMModel):
     final_approver_id: uuid.UUID | None
     rejection_reason: str | None
     allowed_actions: list[ClaimAction] = Field(description="What the caller may do to this claim right now")
+    status_label: str = Field(description="Plain-language status, including who the claim is waiting on")
+    amount_edited: bool = Field(description="True when the submitter changed the amount OCR read from the receipt")
     created_at: datetime
     updated_at: datetime
 

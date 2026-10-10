@@ -390,3 +390,77 @@ async def test_delivered_orders_cannot_be_cancelled(client, world, auth, hoodie,
     for step in ("packed", "delivered"):
         assert (await client.post(status_url, headers=auth(world.treasurer), json={"status": step})).status_code == 200
     assert (await client.post(status_url, headers=auth(world.treasurer), json={"status": "cancelled"})).status_code == 409
+
+
+# --- Several items in one order: titles, line prices and the total -----------------------------
+
+
+async def test_multi_item_order_totals_agree_everywhere(client, db, world, auth, hoodie):
+    """Each line keeps its own price, and one total is used by the API, the payment and the ledger."""
+    mug = (await client.post(f"{MERCH}/products", headers=auth(world.treasurer), json={
+        "name": "Enamel Mug", "base_price": "299.50", "member_price": "249.50",
+        "variants": [{"size": "Standard", "color": "White", "sku": "MUG-WHT", "stock_quantity": 5}],
+    })).json()
+
+    order = await client.post(f"{MERCH}/orders", headers=auth(world.member), json={"items": [
+        {"variant_id": hoodie["m"]["id"], "quantity": 2},
+        {"variant_id": hoodie["xxl"]["id"], "quantity": 1},
+        {"variant_id": mug["variants"][0]["id"], "quantity": 3},
+    ]})
+    assert order.status_code == 201, order.text
+    body = order.json()
+
+    lines = {item["sku"]: item for item in body["items"]}
+    assert {sku: line["product_name"] for sku, line in lines.items()} == {
+        "HOOD-BLK-M": "Club Hoodie", "HOOD-BLK-XXL": "Club Hoodie", "MUG-WHT": "Enamel Mug"}
+    assert {sku: (line["quantity"], line["unit_price"], line["line_total"]) for sku, line in lines.items()} == {
+        "HOOD-BLK-M": (2, 799.0, 1598.0),      # 2 x 799.00
+        "HOOD-BLK-XXL": (1, 899.0, 899.0),     # override 1099.00 less the 200.00 member discount
+        "MUG-WHT": (3, 249.5, 748.5),          # 3 x 249.50, paise kept exactly
+    }
+    for line in body["items"]:
+        assert Decimal(str(line["line_total"])) == line["quantity"] * Decimal(str(line["unit_price"]))
+    # The total is the sum of every line, not the first line's price.
+    assert body["total_amount"] == 3245.5 != lines["HOOD-BLK-M"]["line_total"]
+
+    payment = (await client.post(
+        f"{PAY}/razorpay/create-order", headers=auth(world.member), json={"merch_order_id": body["id"]})).json()
+    assert payment["amount"] == 324550  # paise: exactly 100 x the rupee total
+
+    simulated = (await client.post(
+        f"{PAY}/mock/simulate", headers=auth(world.member), json={"razorpay_order_id": payment["razorpay_order_id"]})).json()
+    assert (await client.post(f"{PAY}/razorpay/verify", headers=auth(world.member), json=simulated)).status_code == 200
+
+    [entry] = await _merch_entries(db)
+    assert entry.amount == Decimal("3245.50")
+    assert await _stock(db, hoodie["m"]) == 8 and await _stock(db, hoodie["xxl"]) == 0
+    assert await _stock(db, mug["variants"][0]) == 2
+
+    # The same variant listed twice is one line with the quantities added.
+    merged = (await client.post(f"{MERCH}/orders", headers=auth(world.member), json={"items": [
+        {"variant_id": hoodie["m"]["id"], "quantity": 1}, {"variant_id": hoodie["m"]["id"], "quantity": 2}]})).json()
+    assert [(item["quantity"], item["line_total"]) for item in merged["items"]] == [(3, 2397.0)]
+    assert merged["total_amount"] == 2397.0
+
+
+async def test_order_pages_show_titles_line_prices_and_total(client, world, auth, hoodie):
+    from app.core.config import get_settings as settings
+    from app.core.security import create_access_token
+
+    order = (await client.post(f"{MERCH}/orders", headers=auth(world.member), json={"items": [
+        {"variant_id": hoodie["m"]["id"], "quantity": 2}, {"variant_id": hoodie["xxl"]["id"], "quantity": 1}]})).json()
+
+    client.cookies.set(settings().session_cookie, create_access_token(world.member.id))
+    for path in (f"/checkout/{order['id']}", "/orders"):
+        page = (await client.get(path)).text
+        assert "Club Hoodie" in page                                  # product title
+        assert "₹799.00" in page and "₹1,598.00" in page              # first line: unit price and line total
+        assert "₹899.00" in page                                      # second line is there too
+        assert "₹2,497.00" in page                                    # overall total, not the first line's price
+
+    store = (await client.get(f"/store/{hoodie['product']['id']}")).text
+    assert "<h1" in store and "Club Hoodie" in store and "₹799.00" in store
+
+    client.cookies.set(settings().session_cookie, create_access_token(world.treasurer.id))
+    admin = (await client.get("/admin/merch/orders")).text
+    assert "Club Hoodie" in admin and "₹1,598.00" in admin and "₹2,497.00" in admin

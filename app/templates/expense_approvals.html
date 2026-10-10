@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Expense approvals · WhoDoo Finance{% endblock %}
+{% block title %}Expense approvals · WhoDoo{% endblock %}
 {% macro claim_table(claims, empty_text) %}
   {% if claims %}
   <div class="table-wrap">
@@ -14,7 +14,7 @@
           <td>{{ claim.event_name or "—" }}</td>
           <td>
             {% if claim.status == "approved" %}<span class="badge approved">Approved</span>
-            {% elif claim.approval_stage == "final" %}<span class="badge pending">Final approval</span>
+            {% elif claim.approval_stage == "final" %}<span class="badge final">Final approval</span>
             {% elif claim.needs_final_approval %}<span class="badge pending">First of two</span>
             {% else %}<span class="badge pending">Single approval</span>{% endif %}
           </td>
@@ -45,3 +45,4 @@
 </div>
 {% endif %}
 {% endblock %}
+{% block scripts %}<script>watchForChanges("/api/v1/expenses/approvals");</script>{% endblock %}

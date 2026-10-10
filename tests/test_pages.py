@@ -107,3 +107,53 @@ async def test_store_and_merch_admin_pages(client, world, auth):
     assert admin.status_code == 200 and "HOOD-BLK-M" in admin.text
     admin_orders = await client.get("/admin/merch/orders")
     assert admin_orders.status_code == 200 and "Mia Member" in admin_orders.text
+
+
+async def test_claim_page_shows_receipt_items_total_and_progress(client, world, auth):
+    import shutil
+
+    import pytest
+
+    if shutil.which("tesseract") is None:
+        pytest.skip("Tesseract is not installed")
+    from tests.test_receipt_ocr import API, MULTI_ITEM
+
+    upload = (await client.post(f"{API}/ocr", headers=auth(world.volunteer), files={"file": ("b.png", MULTI_ITEM, "image/png")})).json()
+    claim = (await client.post(API, headers=auth(world.volunteer), json={
+        "receipt_id": upload["receipt_id"], "title": "Nature Basket Stores purchase", "description": "Stall supplies",
+        "category": "supplies", "amount": "968.00", "expense_date": "2026-09-23", "event_id": str(world.fest.id),
+    })).json()
+
+    client.cookies.update(_cookie(world.volunteer))
+    page = (await client.get(f"/expenses/{claim['id']}")).text
+    assert "Nature Basket Stores purchase" in page                     # claim title
+    assert "Nature Basket Stores</td>" in page                          # merchant read from the receipt
+    assert "Orange Powder" in page and "₹448.00" in page                # first item and its price
+    assert "Cheese" in page and "₹112.00" in page                       # last item
+    assert "Total on receipt" in page and "₹968.00" in page             # the total, distinct from any item
+    assert "Matches receipt" in page
+    assert "Awaiting approval from Lina Lead" in page
+
+    # ₹968 is under the limit, so the lead's approval completes it and the member sees that at once.
+    await client.post(f"{API}/{claim['id']}/approve", headers=auth(world.lead2))
+    assert "Approved · awaiting payment" in (await client.get("/expenses")).text
+
+    # A large claim: after the lead approves, the member sees the first approval, not a bare "pending".
+    upload = (await client.post(f"{API}/ocr", headers=auth(world.volunteer), files={"file": ("b.png", MULTI_ITEM, "image/png")})).json()
+    large = (await client.post(API, headers=auth(world.volunteer), json={
+        "receipt_id": upload["receipt_id"], "title": "Projector hire", "description": "Two days",
+        "category": "other", "amount": "1800.00", "expense_date": "2026-09-23", "event_id": str(world.fest.id),
+    })).json()
+    await client.post(f"{API}/{large['id']}/approve", headers=auth(world.lead2))
+    for path in ("/expenses", f"/expenses/{large['id']}"):
+        text = (await client.get(path)).text
+        assert "First approval done" in text
+        assert "Approved by event lead · awaiting final approval from Tara Treasurer" in text
+    assert "Edited by submitter" in (await client.get(f"/expenses/{large['id']}")).text
+
+
+async def test_pages_are_branded_whodoo(client, world):
+    client.cookies.update(_cookie(world.treasurer))
+    for path in ("/treasurer", "/expenses", "/store"):
+        page = (await client.get(path)).text
+        assert "<title>" in page and "WhoDoo" in page and "WhoDoo Finance" not in page

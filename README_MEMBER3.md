@@ -1,6 +1,6 @@
-# WhoDoo — Finance, Reimbursements & Commerce (Member 3)
+# WhoDoo — Finance, Reimbursements & Commerce module (Member 3)
 
-A FastAPI backend for the money side of a student club, with plain HTML pages for review.
+WhoDoo is an extracurricular club management system for college students. This is one part of it: a FastAPI backend for the money side of a club, with plain HTML pages for review.
 
 | Module | What it does |
 |---|---|
@@ -26,7 +26,7 @@ Everyday commands (run `make help` for the full list):
 | Command | What it does |
 |---|---|
 | `make run` | Start the app with auto-reload (`make run PORT=8080` to change the port) |
-| `make test` | Run all 43 tests against the `whodoo_test` database |
+| `make test` | Run all 64 tests against the `whodoo_test` database |
 | `make test-ledger`, `test-expenses`, `test-merch` | Run one module's tests |
 | `make seed` | Wipe the local database and load fresh demo data |
 | `make migrate` | Apply pending SQL migrations |
@@ -152,7 +152,9 @@ submit ──► pending_approval (first) ──approve──► approved ──
 ```
 
 - **Below ₹1,000:** one approval, from the event's lead. The treasurer or president can step in.
-- **₹1,000 or more:** the first approval, then a final approval from a treasurer or president **who did not give the first one**.
+- **₹1,000 or more:** the event lead's approval is only the first step; the claim then needs the treasurer or president.
+- **A treasurer's or president's approval is always final,** at either stage, so they can approve a large claim directly.
+- **The submitter always sees where the claim stands.** Every claim carries a `status_label`, e.g. "Approved by event lead · awaiting final approval from Rohan Mehta", and the claim page shows the steps. Open pages refresh themselves within about five seconds of a change.
 - **First approver:** the linked event's lead. With no event, or when the lead is the submitter, it goes to the treasurer, then the president.
 - **Nobody decides on or pays out their own claim.** This applies to the treasurer too.
 - **Final approval** writes exactly one ledger entry: `reimbursement`, `debit`, `approved`.
@@ -162,10 +164,23 @@ submit ──► pending_approval (first) ──approve──► approved ──
 ## OCR flow
 
 1. `POST /expenses/ocr` checks the file's real type from its contents (PNG, JPEG, WebP or PDF, up to 8 MB) and stores it under a random name.
-2. Tesseract reads the image in two layout modes and keeps the reading that found more fields.
-3. Rules pick out the fields: the vendor is the first proper line of text; the amount is the number on the "total" line (grand total first), else the largest figure with paise; the date is the first plausible one, read day-first.
-4. The response carries the extracted fields and Tesseract's mean word confidence. The volunteer corrects anything wrong and submits.
-5. The claim stores both what OCR read and what was submitted; the claim page flags differences.
+2. The image is put on a white background and enlarged to about 1,200 px **wide** (receipts are tall and narrow), then Tesseract reads it in two layout modes and the fuller reading is kept.
+3. Rules in `app/services/ocr_service.py` pick out:
+   - **Merchant:** the first line near the top that is a name, skipping bare labels ("Tax Invoice"), labelled details (GSTIN, phone, bill number) and address lines.
+   - **Items:** each line above the summary block, with quantity and unit price when printed. Wrapped item names are joined.
+   - **Subtotal, tax, discount:** read separately from their own lines. Cash tendered, change and card lines are ignored.
+   - **Total:** only ever the figure on a line labelled as the total ("Grand Total", "Net Amount", "Amount Due" … before a plain "Total").
+   - **Date:** the first plausible date, read day-first.
+4. The response carries `extracted_vendor`, `extracted_amount`, `extracted_date`, `line_items`, `subtotal`, `tax_total`, `discount_total`, `items_total`, `amount_status`, `warnings` and Tesseract's own mean word confidence.
+5. The volunteer checks the reading against the receipt, corrects it and submits. Nothing is claimed before that.
+6. The claim keeps both the OCR reading and what was submitted. The claim page shows them side by side, marks edited fields, and lists the items read.
+
+Nothing is guessed:
+
+- If the total line is missing or unreadable, `extracted_amount` is `null` and `amount_status` is `not_found`. The amount field is left empty. `suggested_amount` offers what the readable lines add up to, and is only used if the volunteer picks it.
+- If the total disagrees with the item lines, the total is reported as printed and a warning says so.
+- `ocr_confidence` is how clearly Tesseract read the characters. It is not a measure of whether the fields are right.
+- The ledger is never written from OCR. It gets the amount the volunteer confirmed, and only once an approver approves it.
 
 If Tesseract is missing, the file is a PDF, or the image cannot be read, the upload still succeeds with empty fields and zero confidence, and the volunteer types the values in.
 
@@ -228,7 +243,11 @@ After seeding, the balance is ₹15,140.00 and the Hoodie in M has 10 in stock.
 8. As the treasurer, the **Ledger** shows the merchandise income entry for that order.
 9. **Dashboard**: balance ₹15,089.00, with Bake Sale in the event profit and loss table.
 
-For two-level approval, submit the ₹2,500 sample receipt against **Tech Fest Workshop**: Karthik Nair (lead) approves first, then Rohan Mehta or Ananya Rao gives final approval.
+For two-level approval, submit the ₹2,500 sample receipt against **Tech Fest Workshop**: Karthik Nair (lead) approves first, and the volunteer's page shows "Approved by event lead · awaiting final approval". Then Rohan Mehta or Ananya Rao gives final approval.
+
+For a multi-item receipt, use the third sample on the submit page (six items, tax lines, total ₹968.00).
+
+To watch two users at once, open the second one in a private window: the demo sign-in is one cookie per browser, so "Switch user" changes every tab.
 
 ## Integrating other modules
 
@@ -263,7 +282,9 @@ await ledger_service.record_income(
 - **Supabase is untested.** Database and Storage were developed against local Postgres and local disk; the Supabase paths are config switches that have not been exercised.
 - **Locally stored receipts are served without a sign-in check** from `/uploads`, under unguessable names. On Supabase they would be in a public bucket; signed URLs would be the next step.
 - **PDF receipts are stored but not read by OCR.** The fields must be typed in.
-- **OCR rules are tuned for printed English receipts.** Handwritten or crumpled receipts will need manual entry.
+- **OCR rules are tuned for printed English receipts.** Handwritten, crumpled or badly lit receipts will need manual entry, and individual item lines can still be misread on small images.
+- **The store page orders one product variant at a time.** The API (`POST /merch/orders`) and every order page handle several items per order; there is no cart in the review UI.
+- **Approve, reject and pay buttons use the browser's own confirm and prompt boxes.**
 - **Refunds call the provider before the database commit.** If the commit then failed, a refund could be issued without being recorded.
 - **Stock is not reserved at order time,** so a buyer can reach payment for an item that sells out first. They are refunded automatically.
 - **No pagination on claims and orders lists,** and no CSRF tokens on the review pages (the session cookie is `SameSite=Lax`).

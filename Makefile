@@ -1,4 +1,4 @@
-# WhoDoo Finance — everyday commands. Run `make` or `make help` to list them.
+# WhoDoo — everyday commands. Run `make` or `make help` to list them.
 
 VENV    := .venv
 PY      := $(VENV)/bin/python
@@ -7,7 +7,7 @@ PORT    ?= 8000
 PG_BIN  ?= $(shell brew --prefix postgresql@16 2>/dev/null)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install env db-start db-stop db-create migrate seed run test test-ledger test-expenses test-merch receipts psql clean
+.PHONY: help setup install env db-start db-stop db-create migrate seed run test test-ledger test-expenses test-ocr test-merch test-pages receipts psql clean
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -64,8 +64,14 @@ test-ledger: install ## Run only the TrustLedger tests
 test-expenses: install ## Run only the Snap-to-Reimburse tests
 	$(PY) -m pytest -q tests/test_expenses.py
 
+test-ocr: install ## Run only the receipt reading (OCR) tests
+	$(PY) -m pytest -q tests/test_receipt_ocr.py
+
 test-merch: install ## Run only the MerchFlow and payment tests
 	$(PY) -m pytest -q tests/test_merch.py
+
+test-pages: install ## Run only the HTML page tests
+	$(PY) -m pytest -q tests/test_pages.py
 
 # --- Housekeeping -------------------------------------------------------------------
 

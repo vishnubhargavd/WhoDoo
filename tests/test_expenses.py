@@ -68,9 +68,9 @@ def test_receipt_text_parsing_variants():
     )
     assert amount == Decimal("1180.50")
     assert when == date(2026, 10, 5)
-    # No total line at all: fall back to the largest amount with paise; ignore phone-like integers.
+    # No total line at all: the amount is left empty, never guessed from an item price.
     vendor, amount, when = ocr_service.parse_receipt_text("Print Hub\nPh 9876543210\nPosters 450.00\nTape 60.00", today)
-    assert (vendor, amount, when) == ("Print Hub", Decimal("450.00"), None)
+    assert (vendor, amount, when) == ("Print Hub", None, None)
     # Future and impossible dates are rejected rather than guessed.
     assert ocr_service.extract_date(["Date: 31/02/2026", "Valid till 01/01/2030"], today) is None
     assert ocr_service.parse_receipt_text("", today) == (None, None, None)
@@ -207,22 +207,52 @@ async def test_large_claim_needs_a_second_approver(client, db, world, auth, subm
     assert just_under["needs_final_approval"] is False
 
 
-async def test_one_person_cannot_give_both_approvals(client, db, world, auth, submit):
+async def test_treasurer_or_president_approval_is_always_final(client, db, world, auth, submit):
+    # A large claim the treasurer approves directly is approved: no second step, nothing left "pending".
     claim = await submit(world.volunteer, amount="2500.00", event=world.fest)
+    direct = await client.post(f"{API}/{claim['id']}/approve", headers=auth(world.treasurer))
+    assert direct.status_code == 200
+    assert (direct.json()["status"], direct.json()["status_label"]) == ("approved", "Approved · awaiting payment")
+    assert len(await _ledger_entries(db, claim["id"])) == 1
+
+    # A large claim with no event goes straight to the treasurer, whose approval is final too.
+    no_event = await submit(world.volunteer, amount="1500.00")
+    assert no_event["current_approver_id"] == str(world.treasurer.id)
+    approved = await client.post(f"{API}/{no_event['id']}/approve", headers=auth(world.president))
+    assert approved.json()["status"] == "approved"
+
+
+async def test_submitter_sees_each_approval_step(client, world, auth, submit):
+    """The reported bug: after the event lead approved a large claim, the member's view still just
+    said "pending", as if nothing had happened."""
+    claim = await submit(world.volunteer, amount="1800.00", event=world.fest)
     url = f"{API}/{claim['id']}"
+    assert claim["status_label"] == "Awaiting approval from Lina Lead"
 
-    # The treasurer steps in for the lead, which counts as the first approval only.
-    first = await client.post(f"{url}/approve", headers=auth(world.treasurer))
-    assert first.json()["approval_stage"] == "final"
-    assert first.json()["current_approver_id"] == str(world.president.id)
+    first = await client.post(f"{url}/approve", headers=auth(world.lead2))
+    assert first.json()["status_label"] == "Approved by event lead · awaiting final approval from Tara Treasurer"
 
-    second = await client.post(f"{url}/approve", headers=auth(world.treasurer))
-    assert second.status_code == 409
-    assert second.json()["error"]["code"] == "duplicate_approval"
-    assert await _ledger_entries(db, claim["id"]) == []
+    # What the member sees, in the list and on the claim.
+    [mine] = (await client.get(API, headers=auth(world.volunteer))).json()
+    assert mine["status_label"] == "Approved by event lead · awaiting final approval from Tara Treasurer"
+    assert (mine["status"], mine["approval_stage"]) == ("pending_approval", "final")
+    history = (await client.get(url, headers=auth(world.volunteer))).json()["approval_history"]
+    assert [(log["action"], log["approver_name"]) for log in history] == [
+        ("submitted", "Vik Volunteer"), ("approved", "Lina Lead")
+    ]
 
-    final = await client.post(f"{url}/approve", headers=auth(world.president))
-    assert final.json()["status"] == "approved"
+    # The lead is told why they cannot approve again; the treasurer sees it in their queue.
+    again = await client.post(f"{url}/approve", headers=auth(world.lead2))
+    assert again.status_code == 403 and again.json()["error"]["code"] == "awaiting_final_approval"
+    queue = (await client.get(f"{API}/approvals", headers=auth(world.treasurer))).json()["to_approve"]
+    assert [item["id"] for item in queue] == [claim["id"]]
+
+    await client.post(f"{url}/approve", headers=auth(world.treasurer))
+    [mine] = (await client.get(API, headers=auth(world.volunteer))).json()
+    assert (mine["status"], mine["status_label"]) == ("approved", "Approved · awaiting payment")
+    await client.post(f"{url}/mark-paid", headers=auth(world.treasurer))
+    [mine] = (await client.get(API, headers=auth(world.volunteer))).json()
+    assert (mine["status"], mine["status_label"]) == ("paid", "Paid")
 
 
 async def test_duplicate_approval_is_blocked(client, db, world, auth, submit):

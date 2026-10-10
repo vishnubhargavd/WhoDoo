@@ -1,5 +1,6 @@
 {% extends "base.html" %}
-{% block title %}My expenses · WhoDoo Finance{% endblock %}
+{% block title %}My expenses · WhoDoo{% endblock %}
+{% block scripts %}<script>watchForChanges("/api/v1/expenses");</script>{% endblock %}
 {% block content %}
 <div class="actions" style="justify-content: space-between">
   <div>
@@ -13,7 +14,7 @@
   {% if claims %}
   <div class="table-wrap">
     <table>
-      <thead><tr><th>Submitted</th><th>Claim</th><th>Event</th><th>Category</th><th>Status</th><th>Waiting on</th><th class="num">Amount</th></tr></thead>
+      <thead><tr><th>Submitted</th><th>Claim</th><th>Event</th><th>Category</th><th>Status</th><th>Where it stands</th><th class="num">Amount</th></tr></thead>
       <tbody>
         {% for claim in claims %}
         <tr>
@@ -21,13 +22,12 @@
           <td><a href="/expenses/{{ claim.id }}">{{ claim.title }}</a></td>
           <td>{{ claim.event_name or "—" }}</td>
           <td>{{ claim.category | label }}</td>
-          <td><span class="badge {{ claim.status }}">{{ claim.status | label }}</span></td>
           <td>
-            {% if claim.status == "pending_approval" %}{{ claim.current_approver_name or "Treasurer" }}
-            {% elif claim.status == "approved" %}Payment
-            {% elif claim.status == "change_requested" %}You
-            {% else %}—{% endif %}
+            <span class="badge {{ 'final' if claim.status == 'pending_approval' and claim.approval_stage == 'final' else claim.status }}">
+              {{ "First approval done" if claim.status == "pending_approval" and claim.approval_stage == "final" else claim.status | label }}
+            </span>
           </td>
+          <td>{{ claim.status_label }}</td>
           <td class="num">{{ claim.amount | inr }}</td>
         </tr>
         {% endfor %}

@@ -19,8 +19,9 @@ settings = get_settings()
 settings.check()
 
 app = FastAPI(
-    title="WhoDoo Finance API",
-    description="TrustLedger, Snap-to-Reimburse and MerchFlow for student clubs.",
+    title="WhoDoo API",
+    description="WhoDoo is a club management platform for college students. This service is its finance module: "
+    "TrustLedger, Snap-to-Reimburse and MerchFlow.",
     version="0.1.0",
 )
 

@@ -4,8 +4,9 @@ Approval rules (limit = EXPENSE_AUTO_APPROVAL_LIMIT, default ₹1,000):
 
 * Below the limit, one approval is enough: the event lead's, or a treasurer's or
   president's standing in for them.
-* At or above the limit, two different people must approve: the first approver,
-  then a treasurer or president who did not give the first approval.
+* At or above the limit, the event lead's approval is only the first step; the claim
+  then needs a treasurer or president. A treasurer's or president's approval is
+  always final, so they can approve a large claim directly.
 * Nobody approves, rejects or pays out their own claim.
 * The ledger entry is written exactly once, on final approval, and only moves
   the balance when the claim is marked paid.
@@ -30,6 +31,7 @@ from app.schemas.expense import (
     ExpenseClaimDetail,
     ExpenseClaimOut,
     ExpenseClaimResubmit,
+    OcrLineItem,
     OcrResponse,
 )
 from app.services import ledger_service, ocr_service, shared_directory, storage_service
@@ -64,14 +66,15 @@ async def upload_receipt(session: AsyncSession, user: CurrentUser, data: bytes) 
     session.add(upload)
     await session.flush()
 
+    parsed = result.parsed
     found = [name for name, value in
-             (("vendor", result.vendor), ("amount", result.amount), ("date", result.expense_date)) if value]
+             (("merchant", result.vendor), ("total", result.amount), ("date", result.expense_date)) if value]
     if not result.available:
         message = "We could not read this receipt automatically. Please enter the details yourself."
     elif len(found) == 3:
-        message = "Receipt read. Check the details before submitting."
+        message = "Receipt read. Check every detail against the receipt before submitting."
     else:
-        message = f"Receipt partly read ({', '.join(found) or 'nothing'} found). Fill in the rest."
+        message = f"Receipt partly read ({', '.join(found) or 'nothing'} found). Please fill in the rest."
     return OcrResponse(
         receipt_id=upload.id,
         receipt_url=receipt_url,
@@ -80,6 +83,18 @@ async def upload_receipt(session: AsyncSession, user: CurrentUser, data: bytes) 
         extracted_vendor=result.vendor,
         extracted_amount=result.amount,
         extracted_date=result.expense_date,
+        amount_status="read_from_total_line" if result.amount is not None else "not_found",
+        suggested_amount=parsed.suggested_total,
+        line_items=[
+            OcrLineItem(description=item.description, quantity=item.quantity, unit_price=item.unit_price,
+                        amount=item.amount)
+            for item in parsed.items
+        ],
+        items_total=parsed.items_total,
+        subtotal=parsed.subtotal,
+        tax_total=parsed.tax_total,
+        discount_total=parsed.discount_total,
+        warnings=parsed.warnings,
         message=message,
     )
 
@@ -152,19 +167,18 @@ def _why_cannot_decide(claim: ExpenseClaim, user: CurrentUser) -> AppError | Non
         return conflict("not_pending", f"This claim is already {claim.status.replace('_', ' ')}")
     if user.id == claim.submitted_by:
         return AppError(403, "self_approval", "You cannot decide on your own claim")
-    is_admin = user.role in FINANCE_ADMINS
-    if claim.approval_stage == "first":
-        if is_admin or user.id == claim.current_approver_id:
-            return None
-        return forbidden("This claim is waiting for a different approver")
-    if not is_admin:
+    if user.role in FINANCE_ADMINS:
+        return None  # the treasurer and president can decide any claim but their own, at either stage
+    if claim.approval_stage == "final":
+        if user.id == claim.first_approved_by:
+            return AppError(
+                403, "awaiting_final_approval",
+                "You have already approved this claim. It is now waiting for the treasurer or president",
+            )
         return forbidden("Final approval needs the treasurer or president")
-    if user.id == claim.first_approved_by:
-        return conflict(
-            "duplicate_approval",
-            "You already gave the first approval. A different treasurer or president must give the final one",
-        )
-    return None
+    if user.id == claim.current_approver_id:
+        return None
+    return forbidden("This claim is waiting for a different approver")
 
 
 def allowed_actions(claim: ExpenseClaim, user: CurrentUser) -> list[str]:
@@ -176,6 +190,22 @@ def allowed_actions(claim: ExpenseClaim, user: CurrentUser) -> list[str]:
     if claim.status == "change_requested" and user.id == claim.submitted_by:
         actions.append("resubmit")
     return actions
+
+
+def status_label(claim: ExpenseClaim, waiting_on: str | None) -> str:
+    """Say where a claim stands in plain words, so a first approval never looks like "nothing happened"."""
+    who = waiting_on or "the treasurer"
+    if claim.status == "pending_approval":
+        if claim.approval_stage == "final":
+            return f"Approved by event lead · awaiting final approval from {who}"
+        return f"Awaiting approval from {who}"
+    return {
+        "approved": "Approved · awaiting payment",
+        "paid": "Paid",
+        "rejected": "Rejected",
+        "change_requested": "Changes requested · waiting for the submitter to resubmit",
+        "draft": "Draft",
+    }[claim.status]
 
 
 def _ledger_key(claim: ExpenseClaim) -> str:
@@ -248,10 +278,12 @@ async def approve_claim(
     if error := _why_cannot_decide(claim, user):
         raise error
 
-    if claim.approval_stage == "first" and needs_final_approval(claim.amount):
-        final_approver = await _finance_admin(session, claim.club_id, exclude={claim.submitted_by, user.id})
+    # An event lead's approval of a large claim is only the first of two. A treasurer's or
+    # president's approval is always final, whichever stage the claim is at.
+    if user.role not in FINANCE_ADMINS and needs_final_approval(claim.amount):
+        final_approver = await _finance_admin(session, claim.club_id, exclude={claim.submitted_by})
         if final_approver is None:
-            raise conflict("no_final_approver", "Nobody else is available to give final approval")
+            raise conflict("no_final_approver", "Nobody is available to give final approval")
         claim.first_approved_by = user.id
         claim.approval_stage = "final"
         claim.current_approver_id = final_approver
@@ -358,6 +390,8 @@ def _extras(claim: ExpenseClaim, user: CurrentUser, people: dict, events: dict) 
         "event_name": events.get(claim.event_id),
         "needs_final_approval": needs_final_approval(claim.amount),
         "allowed_actions": allowed_actions(claim, user),
+        "status_label": status_label(claim, name(claim.current_approver_id)),
+        "amount_edited": claim.extracted_amount is not None and claim.extracted_amount != claim.amount,
     }
 
 

@@ -91,6 +91,21 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-sp
 .badge.rejected, .badge.failed, .badge.debit { background: var(--red-bg); color: var(--red); }
 .badge.cancelled, .badge.refunded, .badge.draft { background: var(--gray-bg); color: var(--gray); }
 
+.badge.final { background: #e4ebff; color: #2f4bd8; }
+
+/* Claim progress */
+.steps { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 0 0 16px; }
+.steps li {
+  flex: 1 1 150px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--card); color: var(--muted); font-size: 13px;
+}
+.steps li strong { display: block; color: var(--text); font-size: 14px; }
+.steps li.done { background: var(--green-bg); border-color: #b9e6d3; }
+.steps li.done strong { color: var(--green); }
+.steps li.current { background: var(--amber-bg); border-color: #f5dba6; }
+.steps li.current strong { color: var(--amber); }
+.total-row td { font-weight: 700; border-top: 2px solid var(--line); }
+
 /* Forms */
 form.stack, .stack { display: grid; gap: 12px; }
 .fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }

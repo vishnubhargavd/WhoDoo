@@ -1,1 +1,1 @@
-{% for item in order.items %}{{ item.quantity }} × {{ item.product_name }} ({{ item.size }}, {{ item.color }}){% if not loop.last %}<br>{% endif %}{% endfor %}
+{% for item in order.items %}{{ item.quantity }} × {{ item.product_name }} ({{ item.size }}, {{ item.color }}) <span class="muted nowrap">@ {{ item.unit_price | inr }} = {{ item.line_total | inr }}</span>{% if not loop.last %}<br>{% endif %}{% endfor %}
