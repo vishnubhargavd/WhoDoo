@@ -3,3 +3,4 @@ coverage/
 .next/
 .env*
 !.env.example
+*.tsbuildinfo
