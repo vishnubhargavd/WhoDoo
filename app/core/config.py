@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     fairseat_quote_seconds: int = 300
     fairseat_max_per_booking: int = 6
     fairseat_max_per_purchaser: int = 6
+    # Ticket payments are a second switch, also off by default.
+    fairseat_payments_enabled: bool = False
+    # Where the payment provider sends a ticket buyer back to. Blank = this API's own return route.
+    fairseat_return_url: str = ""
 
     @property
     def database_is_local(self) -> bool:

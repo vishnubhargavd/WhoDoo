@@ -16,6 +16,7 @@ os.environ["PAYMENT_PROVIDER"] = "mock"
 os.environ["EXPENSE_AUTO_APPROVAL_LIMIT"] = "1000"
 os.environ["SUPABASE_URL"] = ""
 os.environ["FAIRSEAT_ENABLED"] = "1"
+os.environ["FAIRSEAT_PAYMENTS_ENABLED"] = "1"
 os.environ["UPLOAD_DIR"] = tempfile.mkdtemp(prefix="whodoo-test-uploads-")
 
 import httpx  # noqa: E402

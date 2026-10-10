@@ -55,6 +55,8 @@ class CheckoutRequest:
     metadata: dict[str, str]
     success_url: str
     cancel_url: str
+    reference: str | None = None    # shown as the client reference; defaults to the merch order id
+    expires_at: int | None = None   # Unix seconds; the provider's default when None
 
 
 @dataclass
@@ -69,6 +71,15 @@ class CheckoutSession:
     currency: str
     payment_intent_id: str | None
     metadata: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
+class RefundResult:
+    """A refund as the provider reports it. Only `succeeded` means the money has gone back."""
+
+    id: str | None
+    status: str                 # succeeded | pending | failed
+    failure_reason: str | None = None
 
 
 @dataclass
@@ -128,7 +139,7 @@ class PaymentProvider(Protocol):
 
     def handle_webhook(self, body: bytes, signature: str) -> WebhookEvent: ...
 
-    def refund(self, payment_intent_id: str, amount_paise: int, idempotency_key: str) -> None: ...
+    def refund(self, payment_intent_id: str, amount_paise: int, idempotency_key: str) -> RefundResult: ...
 
 
 class StripePaymentProvider:
@@ -174,7 +185,8 @@ class StripePaymentProvider:
                 ],
                 success_url=request.success_url,
                 cancel_url=request.cancel_url,
-                client_reference_id=request.metadata["merch_order_id"],
+                client_reference_id=request.reference or request.metadata.get("merch_order_id"),
+                **({"expires_at": request.expires_at} if request.expires_at else {}),
                 metadata=request.metadata,
                 # The same metadata on the PaymentIntent, so payment_intent.* webhooks find the order.
                 payment_intent_data={"metadata": request.metadata},
@@ -196,9 +208,9 @@ class StripePaymentProvider:
     def handle_webhook(self, body: bytes, signature: str) -> WebhookEvent:
         return parse_webhook(body, signature, self._webhook_secret)
 
-    def refund(self, payment_intent_id: str, amount_paise: int, idempotency_key: str) -> None:
+    def refund(self, payment_intent_id: str, amount_paise: int, idempotency_key: str) -> RefundResult:
         try:
-            stripe.Refund.create(
+            raw = stripe.Refund.create(
                 api_key=self._secret_key,
                 idempotency_key=idempotency_key,
                 payment_intent=payment_intent_id,
@@ -206,6 +218,11 @@ class StripePaymentProvider:
             )
         except stripe.StripeError as exc:
             raise _provider_error(exc) from exc
+        data = raw.to_dict()
+        status = data.get("status") or "pending"
+        if status not in ("succeeded", "failed"):
+            status = "pending"  # pending, requires_action: not settled either way yet
+        return RefundResult(id=data.get("id"), status=status, failure_reason=data.get("failure_reason"))
 
 
 class MockPaymentProvider:
@@ -222,6 +239,9 @@ class MockPaymentProvider:
         self.webhook_secret = webhook_secret
         self._sessions: dict[str, CheckoutSession] = {}
         self.refunds: dict[str, tuple[str, int]] = {}   # idempotency key -> (payment intent, paise)
+        self.refund_results: dict[str, RefundResult] = {}
+        # Tests set this to "pending" or "failed" to play a refund that does not settle at once.
+        self.next_refund_status = "succeeded"
 
     def create_checkout_session(self, request: CheckoutRequest) -> CheckoutSession:
         session = CheckoutSession(
@@ -243,10 +263,17 @@ class MockPaymentProvider:
     def handle_webhook(self, body: bytes, signature: str) -> WebhookEvent:
         return parse_webhook(body, signature, self.webhook_secret)
 
-    def refund(self, payment_intent_id: str, amount_paise: int, idempotency_key: str) -> None:
+    def refund(self, payment_intent_id: str, amount_paise: int, idempotency_key: str) -> RefundResult:
+        # Like Stripe, the same idempotency key returns the first answer and refunds nothing more.
         if idempotency_key not in self.refunds:
             self.refunds[idempotency_key] = (payment_intent_id, amount_paise)
-            logger.info("Mock refund of %s paise for %s", amount_paise, payment_intent_id)
+            status = self.next_refund_status
+            self.refund_results[idempotency_key] = RefundResult(
+                id=f"re_mock_{secrets.token_hex(8)}", status=status,
+                failure_reason="declined by the mock provider" if status == "failed" else None,
+            )
+            logger.info("Mock refund of %s paise for %s: %s", amount_paise, payment_intent_id, status)
+        return self.refund_results[idempotency_key]
 
     def simulate_payment(self, session_id: str, succeed: bool = True) -> CheckoutSession | None:
         """Play the part of the buyer on Stripe's checkout page: pay, or have the card declined."""

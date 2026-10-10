@@ -11,6 +11,7 @@ from app.models.base import Base, created_at_col, updated_at_col
 
 BOOKING_STATUSES = ("pending_payment", "confirmed", "cancelled", "expired")
 BOOKING_PAYMENT_STATUSES = ("pending", "failed", "paid", "not_required", "refunded")
+REFUND_STATUSES = ("required", "pending", "succeeded", "failed")
 TICKET_STATUSES = ("pending_issue", "issued", "revoked", "checked_in")
 
 
@@ -93,6 +94,32 @@ class TicketBooking(Base):
     cancelled_at: Mapped[datetime | None] = _moment(nullable=True)
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
+    # Payment and refund (migrations/pending/021_fairseat_payments.sql).
+    stripe_checkout_session_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    paid_at: Mapped[datetime | None] = _moment(nullable=True)
+    refund_status: Mapped[str | None] = mapped_column(Text)
+    refund_reason: Mapped[str | None] = mapped_column(Text)
+    stripe_refund_id: Mapped[str | None] = mapped_column(Text, unique=True)
+    refund_failure: Mapped[str | None] = mapped_column(Text)
+    refund_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    refunded_at: Mapped[datetime | None] = _moment(nullable=True)
+
+
+class TicketPaymentEvent(Base):
+    """One webhook delivery handled by the ticket payment endpoint."""
+
+    __tablename__ = "ticket_payment_events"
+
+    id: Mapped[uuid.UUID] = _id()
+    provider: Mapped[str] = mapped_column(Text)
+    provider_event_id: Mapped[str] = mapped_column(Text, unique=True)
+    event_type: Mapped[str] = mapped_column(Text)
+    ticket_booking_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("ticket_bookings.id"))
+    payment_intent_id: Mapped[str | None] = mapped_column(Text)
+    outcome: Mapped[str] = mapped_column(Text)
+    detail: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime] = created_at_col()
 
 
 class TicketBookingCommand(Base):
