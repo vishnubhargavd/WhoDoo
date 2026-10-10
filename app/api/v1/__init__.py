@@ -11,6 +11,7 @@ from app.api.v1 import (
     memberships,
     merch,
     payments,
+    public_events,
     tasks,
 )
 
@@ -19,6 +20,10 @@ api_router.include_router(ledger.router)
 api_router.include_router(expenses.router)
 api_router.include_router(merch.router)
 api_router.include_router(payments.router)
+# Public registration: anyone can see published events and register (no sign-in)
+api_router.include_router(public_events.router)
+# Before events.router, so /events/registrations/... is not read as an event id.
+api_router.include_router(public_events.organiser)
 # Member 2: Event Management, CrewPulse, Event Autopilot, SyncSphere
 api_router.include_router(events.router)
 api_router.include_router(tasks.router)
