@@ -821,6 +821,8 @@ button.brand-mark:hover { transform: scale(1.06); box-shadow: none; }
 .budget-bar span.over { background: var(--coral); }
 
 /* --- Merchandise pictures ------------------------------------------------------------ */
+/* Taller than the old strip, so a product photo is shown nearly whole rather than cropped to a band. */
+.grid > .product img { height: auto; aspect-ratio: 5 / 4; object-fit: cover; }
 .product img { object-fit: cover; }
 .merch-thumb { width: 44px; height: 44px; margin-right: 10px; vertical-align: middle; object-fit: cover; border: var(--rule); border-radius: 10px; }
 

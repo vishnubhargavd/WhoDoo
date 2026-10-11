@@ -74,7 +74,9 @@ def product_image(product) -> str:
         return product.image_url
     name = (getattr(product, "name", "") or "").lower()
     art = next((picture for words, picture in MERCH_ART if any(word in name for word in words)), "item")
-    return static(f"merch/{art}.svg")
+    # A photograph where the club has supplied one (app/static/merch/<name>.jpeg), else the drawing.
+    photo = f"merch/{art}.jpeg"
+    return static(photo if (APP_DIR / "static" / photo).exists() else f"merch/{art}.svg")
 
 
 templates.env.globals["static"] = static

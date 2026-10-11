@@ -183,9 +183,14 @@ async def test_every_product_has_a_picture_and_qr_codes_scale_to_their_box(clien
     class Item:
         def __init__(self, name, image_url=None): self.name, self.image_url = name, image_url
 
-    assert "merch/hoodie.svg" in product_image(Item("Club Hoodie"))
-    assert "merch/tshirt.svg" in product_image(Item("Fest T-Shirt 2026"))
-    assert "merch/mug.svg" in product_image(Item("Enamel Mug"))
+    # The hoodie, shirt and mug use the club's own photographs; the rest fall back to drawings.
+    assert "merch/hoodie.jpeg" in product_image(Item("Club Hoodie"))
+    assert "merch/tshirt.jpeg" in product_image(Item("Fest T-Shirt 2026"))
+    assert "merch/mug.jpeg" in product_image(Item("Enamel Mug"))
+    assert "merch/cap.svg" in product_image(Item("Club Cap"))
+    for name in ("hoodie", "tshirt", "mug"):
+        photo = await client.get(f"/static/merch/{name}.jpeg")
+        assert photo.status_code == 200 and photo.content[:2] == b"\xff\xd8"          # a real JPEG
     assert "merch/item.svg" in product_image(Item("Mystery Box"))                 # anything else still gets one
     assert product_image(Item("Club Hoodie", "https://example.com/h.png")) == "https://example.com/h.png"
     for name in ("hoodie", "tshirt", "mug", "cap", "bag", "sticker", "item"):
