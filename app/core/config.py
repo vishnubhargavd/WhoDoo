@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     # local: tokens this app signs with JWT_SECRET (sub = users.id), plus the demo picker when
     #        DEMO_AUTH=1 on a local database. For development and tests.
     # supabase: Supabase Auth access tokens only, verified with ES256 against the project's
-    #        JWKS and mapped to a user through users.auth_user_id. See README_AUTH_BRIDGE.md.
+    #        JWKS and mapped to a user through users.auth_user_id. See docs/AUTH_BRIDGE.md.
     auth_mode: Literal["local", "supabase"] = "local"
     demo_auth: bool = False
     jwt_secret: str = DEFAULT_JWT_SECRET

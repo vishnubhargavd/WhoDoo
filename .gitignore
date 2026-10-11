@@ -1,10 +1,26 @@
+# Python environments and caches
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# Node & Frontend build artifacts
+node_modules/
+.next/
+*.tsbuildinfo
+coverage/
+dist/
+build/
+
+# Local configuration and runtime data
 .env
 uploads/
-.DS_Store
 outbox/
+
 # Readable sign-in details written by scripts/setup_credentials.py. Never commit.
 credentials/
+
+# OS and log artifacts
+*.log
+.DS_Store
+Thumbs.db
