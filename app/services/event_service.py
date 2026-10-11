@@ -408,3 +408,78 @@ async def readiness(db: AsyncSession, user: CurrentUser, event: Event, now: date
         event_id=event.id, applicable=report.applicable, score=report.score, band=report.band,
         summary=report.summary, factors=[vars(f) for f in report.factors], stats=report.stats, generated_at=now,
     )
+
+
+# --- Handing an event over when its lead is double-booked ----------------------------------
+
+
+async def available_leads(db: AsyncSession, event: Event) -> list[User]:
+    """Event leads (and the president) in the club who lead nothing else that overlaps this event."""
+    if not (event.starts_at and event.ends_at):
+        return []
+    busy = set(await db.scalars(
+        select(Event.lead_id).where(
+            Event.club_id == event.club_id, Event.id != event.id, Event.lead_id.isnot(None),
+            Event.status.in_(("draft", "published")), Event.starts_at < event.ends_at, Event.ends_at > event.starts_at,
+        )
+    ))
+    return [lead for lead in await list_leads(db, event.club_id) if lead.id != event.lead_id and lead.id not in busy]
+
+
+async def lead_is_double_booked(db: AsyncSession, event: Event) -> bool:
+    if not (event.lead_id and event.starts_at and event.ends_at):
+        return False
+    return await db.scalar(
+        select(Event.id).where(
+            Event.club_id == event.club_id, Event.id != event.id, Event.lead_id == event.lead_id,
+            Event.status.in_(("draft", "published")), Event.starts_at < event.ends_at, Event.ends_at > event.starts_at,
+        ).limit(1)
+    ) is not None
+
+
+async def hand_over(db: AsyncSession, user: CurrentUser, event: Event, lead_id: uuid.UUID) -> User:
+    """Give the event to another lead who is free at that time. The president, or the lead it is taken from."""
+    if not can_manage(user, event):
+        raise forbidden("Only the president or this event's lead can hand it over")
+    if event.status in ("cancelled", "completed"):
+        raise conflict("event_closed", f"A {event.status} event can no longer be handed over")
+    free = {lead.id: lead for lead in await available_leads(db, event)}
+    if lead_id not in free:
+        raise conflict("lead_not_available", "That person is not free at this event's time. Pick another lead, or move the event.")
+    previous, event.lead_id = event.lead_id, lead_id
+    await db.flush()
+    audit_service.record(db, club_id=event.club_id, actor_id=user.id, action="event_handed_over", entity_type="event",
+                         entity_id=event.id, details={"from": str(previous) if previous else None, "to": str(lead_id)})
+    return free[lead_id]
+
+
+async def standing_event_clashes(db: AsyncSession, club_id: uuid.UUID, lead_id: uuid.UUID | None = None) -> list[dict]:
+    """Pairs of open events in the club that overlap in time and share a lead or a venue.
+
+    This is what an event's own page shows as a lead or venue clash, gathered for the whole club so
+    the Crew clashes page lists it too. `lead_id` keeps only pairs involving an event that person leads."""
+    events = list(await db.scalars(
+        select(Event).where(Event.club_id == club_id, Event.status.in_(("draft", "published")),
+                            Event.starts_at.isnot(None), Event.ends_at.isnot(None)).order_by(Event.starts_at, Event.name)
+    ))
+    people = await shared_directory.get_users(db, [e.lead_id for e in events])
+    venue = lambda e: " ".join((e.venue or "").lower().split())  # noqa: E731
+    found = []
+    for index, first in enumerate(events):
+        for second in events[index + 1:]:
+            if not (first.starts_at < second.ends_at and second.starts_at < first.ends_at):
+                continue
+            if lead_id is not None and lead_id not in (first.lead_id, second.lead_id):
+                continue
+            kinds = []
+            if first.lead_id and first.lead_id == second.lead_id:
+                kinds.append("lead")
+            if venue(first) and venue(first) == venue(second):
+                kinds.append("venue")
+            if kinds:
+                lead = people.get(first.lead_id)
+                found.append({"first": first, "second": second, "kinds": kinds,
+                              "lead_name": lead.full_name if lead and "lead" in kinds else None,
+                              "venue": first.venue if "venue" in kinds else None,
+                              "free_leads": len(await available_leads(db, second)) if "lead" in kinds else 0})
+    return found

@@ -104,13 +104,15 @@ SECTIONS = (
     ("Events", (
         ("Events", "/events", None, None),
         ("My tasks", "/my-tasks", None, None),
-        ("Register for events", "/explore", None, None),
+        ("Book events", "/explore", None, None),
         ("Crew clashes", "/crew/review", ORGANISER_ROLES, None),
+        ("Check-in", "/check-in", DOOR_STAFF, "checkin"),
     )),
+    # Only when FAIRSEAT_ENABLED=1. Normally club members do not book tickets: events are for
+    # people outside the club, who register on the public pages without an account.
     ("Tickets", (
         ("Book tickets", "/tickets", None, "tickets"),
         ("My tickets", "/tickets/mine", None, "tickets"),
-        ("Check-in", "/check-in", DOOR_STAFF, "checkin"),
     )),
     ("Club", (
         ("Memberships", "/memberships", None, "memberships"),
@@ -145,8 +147,9 @@ ALIASES = {"/checkout": "/orders"}
 def coming_soon() -> tuple[str, ...]:
     """Modules whose tables are not in this database yet."""
     found = modules.available()
-    return tuple(label for name, (label, _) in modules.MODULES.items()
-                 if name not in found and name not in modules.UNLISTED)
+    # Member ticket booking is switched off on purpose, so it is not something "coming soon".
+    hidden = set(modules.UNLISTED) | (set() if get_settings().fairseat_enabled else {"tickets"})
+    return tuple(label for name, (label, _) in modules.MODULES.items() if name not in found and name not in hidden)
 
 
 def navigation(user: CurrentUser | None, path: str) -> dict:

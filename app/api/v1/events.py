@@ -1,7 +1,8 @@
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db
@@ -16,7 +17,7 @@ from app.schemas.events import (
     ReadinessOut,
     ScheduleCheckOut,
 )
-from app.services import assignment_review, event_service, fairseat_payments, task_service
+from app.services import assignment_review, event_service, fairseat_payments, registration_service, task_service
 
 router = APIRouter(prefix="/events", tags=["Event Management"])
 
@@ -54,12 +55,52 @@ async def get_event(
 async def update_event(
     event_id: uuid.UUID,
     body: EventUpdate,
+    background: BackgroundTasks,
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> EventOut:
     event = await event_service.get_visible_event(db, user, event_id)
+    before = (event.starts_at, event.ends_at, event.venue)
     await event_service.update_event(db, user, event, body)
     await db.commit()
+    if (event.starts_at, event.ends_at, event.venue) != before:
+        # Everyone who registered is told about a new date, time or venue.
+        background.add_task(registration_service.notify_participants, event.id, "Event update",
+                            f"the details of {event.name} have changed. Please note the new date, time and place below.")
+    return await _one(db, user, event)
+
+
+class HandOver(BaseModel):
+    lead_id: uuid.UUID
+
+
+@router.get("/{event_id}/handover")
+async def handover_options(
+    event_id: uuid.UUID, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Who could take this event over: leads with nothing else on at that time. If nobody is free,
+    the answer says so and offers other times instead."""
+    event = await event_service.get_managed_event(db, user, event_id)
+    free = await event_service.available_leads(db, event)
+    schedule = await event_service.schedule_check(db, user, event)
+    return {
+        "double_booked": await event_service.lead_is_double_booked(db, event),
+        "available_leads": [{"id": lead.id, "full_name": lead.full_name, "role": lead.role} for lead in free],
+        "suggested_slots": [] if free else [{"starts_at": s.starts_at, "ends_at": s.ends_at} for s in schedule.suggestions],
+    }
+
+
+@router.post("/{event_id}/handover", response_model=EventOut)
+async def hand_over(
+    event_id: uuid.UUID, body: HandOver, background: BackgroundTasks,
+    user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db),
+) -> EventOut:
+    """Hand the event to another lead who is free then. Everyone registered is emailed."""
+    event = await event_service.get_visible_event(db, user, event_id)
+    lead = await event_service.hand_over(db, user, event, body.lead_id)
+    await db.commit()
+    background.add_task(registration_service.notify_participants, event.id, "New organiser",
+                        f"{event.name} is now being organised by {lead.full_name}. Nothing else has changed.")
     return await _one(db, user, event)
 
 

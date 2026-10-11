@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db
 from app.core.errors import forbidden
-from app.services import assignment_review, notification_service, profile_service
+from app.services import assignment_review, event_service, notification_service, profile_service
 from app.web.templating import render
 
 router = APIRouter(include_in_schema=False)
@@ -37,5 +37,6 @@ async def crew_review_page(request: Request, user: CurrentUser = Depends(get_cur
     return render(
         request, "crew_review.html", user,
         flagged=await assignment_review.scan(db, user.club_id, lead_id=mine_only),
+        event_clashes=await event_service.standing_event_clashes(db, user.club_id, lead_id=mine_only),
         overrides=await assignment_review.overrides(db, user.club_id) if user.role == "president" else [],
     )

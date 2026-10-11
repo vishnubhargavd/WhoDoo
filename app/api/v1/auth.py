@@ -14,7 +14,7 @@ from app.core.config import get_settings
 from app.core.dependencies import CurrentUser, get_current_user, get_db
 from app.core.errors import AppError
 from app.core.security import TOKEN_TTL, create_access_token
-from app.services import audit_service, auth_service
+from app.services import audit_service, auth_service, membership_service, modules, reminder_service
 
 router = APIRouter(prefix="/auth", tags=["Sign-in"])
 
@@ -45,6 +45,12 @@ async def login(body: LoginIn, response: Response, db: AsyncSession = Depends(ge
     """Check a username and password and start a session. A wrong username and a wrong password
     get the same answer."""
     user = await auth_service.authenticate(db, body.username, body.password, body.user_id)
+    # Every sign-in checks the membership's expiry: a reminder is written if it runs out within
+    # the week (or already has), and the bell in the top bar shows it.
+    if modules.migrated("reminders") or "reminders" in await modules.load(db):
+        await membership_service.expire_lapsed(db, user.club_id)
+        await reminder_service.generate(db, user_id=user.id)
+    await membership_service.keep_president_a_member(db, user)
     audit_service.record(db, club_id=user.club_id, actor_id=user.id, action="auth.signed_in",
                          entity_type="user", entity_id=user.id, details=None)
     await db.commit()

@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.common import Money, ORMModel, PositiveMoney
+from app.schemas.events import invalid
 
 EntryType = Literal["income", "expense", "reimbursement", "refund", "adjustment"]
 SourceModule = Literal["membership", "event_ticket", "merchandise", "expense_claim", "fundraiser", "manual"]
@@ -128,10 +129,10 @@ class ManualEntryCreate(BaseModel):
     def direction_matches_type(self):
         if self.entry_type == "adjustment":
             if self.direction is None:
-                raise ValueError("direction is required for an adjustment")
+                raise invalid("direction is required for an adjustment")
         else:
             expected = "credit" if self.entry_type == "income" else "debit"
             if self.direction not in (None, expected):
-                raise ValueError(f"{self.entry_type} entries are always {expected}")
+                raise invalid(f"{self.entry_type} entries are always {expected}")
             self.direction = expected
         return self

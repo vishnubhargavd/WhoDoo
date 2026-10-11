@@ -13,7 +13,7 @@
     <label>Message <textarea name="body" rows="4" required maxlength="5000"></textarea></label>
     <div class="fields">
       <label>Who is it for
-        <select name="audience">
+        <select name="audience" id="announce-audience">
           <option value="everyone">Everyone in the club</option>
           <option value="members">Members only</option>
           <option value="volunteers">Volunteers and officers</option>
@@ -21,8 +21,8 @@
           <option value="event">People on one event (pick it)</option>
         </select>
       </label>
-      <label>Event (for an event announcement)
-        <select name="event_id"><option value="">—</option>
+      <label id="announce-event" hidden>Which event
+        <select name="event_id"><option value="">Choose the event</option>
           {% for e in events %}<option value="{{ e.id }}">{{ e.name }}</option>{% endfor %}
         </select>
       </label>
@@ -53,4 +53,21 @@
 {% else %}
 <div class="card"><p class="empty">Nothing has been announced yet.</p></div>
 {% endfor %}
+{% endblock %}
+{% block scripts %}
+<script>
+// The event list only matters for an event announcement, so it only shows then.
+(() => {
+  const audience = document.getElementById("announce-audience"), event = document.getElementById("announce-event");
+  if (!audience) return;
+  const sync = () => {
+    const on = audience.value === "event";
+    event.hidden = !on;
+    event.querySelector("select").required = on;
+    if (!on) event.querySelector("select").value = "";
+  };
+  audience.addEventListener("change", sync);
+  sync();
+})();
+</script>
 {% endblock %}

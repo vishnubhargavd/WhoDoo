@@ -87,7 +87,9 @@ async def _home_tiles(db: AsyncSession, user: CurrentUser) -> list[dict]:
         mine = await membership_service.my_membership(db, user)
         figure = {"active": "Active", "pending": "Pending", "none": "Join"}.get(mine.status, "Renew")
         detail = "Plans, dues and the member discount on tickets."
-        if mine.status == "active":
+        if mine.permanent:
+            figure, detail = "Top tier", "Yours for as long as you are president. Every event is free for you."
+        elif mine.status == "active":
             detail = f"{mine.plan.name}, valid until {mine.expires_at.astimezone().strftime('%d %b %Y')}."
         elif mine.awaiting == "payment":
             detail = f"{inr(mine.amount_due_paise / 100)} of dues waiting to be paid."
@@ -206,10 +208,11 @@ async def treasurer_dashboard(
 
 @router.get("/treasurer/events/{event_id}")
 async def event_cash_flow_page(
-    event_id: uuid.UUID, request: Request, user: CurrentUser = Depends(require_finance_admin),
+    event_id: uuid.UUID, request: Request, user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """One event's money in and out, against its budget. Treasurer and president."""
+    """One event's money in and out, against its budget. The president and treasurer for any event;
+    an event lead for the events they lead (checked in the service)."""
     return render(request, "treasurer_event.html", user, flow=await cashflow_service.event_cash_flow(db, user, event_id))
 
 

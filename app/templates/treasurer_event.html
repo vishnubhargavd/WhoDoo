@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Cash flow · {{ flow.event.name }} · WhoDoo{% endblock %}
 {% block content %}
-<p><a href="/treasurer">← Finance dashboard</a></p>
+<p>{% if user.is_finance_admin %}<a href="/treasurer">← Finance dashboard</a>{% else %}<a href="/events/{{ flow.event.id }}">← Back to the event</a>{% endif %}</p>
 <div class="actions" style="justify-content: space-between; align-items: flex-start">
   <div>
     <h1>{{ flow.event.name }}</h1>
@@ -9,7 +9,7 @@
   </div>
   <span class="actions">
     <a class="button secondary small" href="/events/{{ flow.event.id }}">Event page</a>
-    <a class="button secondary small" href="/treasurer/ledger?event_id={{ flow.event.id }}">In the ledger</a>
+    {% if user.is_finance_admin %}<a class="button secondary small" href="/treasurer/ledger?event_id={{ flow.event.id }}">In the ledger</a>{% endif %}
   </span>
 </div>
 {% set b = flow.budget %}

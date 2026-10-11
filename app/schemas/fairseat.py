@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from app.schemas.common import ORMModel
 from app.services.ticket_rules import MAX_NAME_LENGTH, MAX_PRICE_PAISE
+from app.schemas.events import invalid
 
 IdempotencyKey = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{16,128}$")]
 Paise = Annotated[int, Field(ge=0, le=9_007_199_254_740_991, strict=True)]
@@ -20,7 +21,7 @@ class _Strict(BaseModel):
     def _moments_have_timezones(self):
         for name, value in self:
             if isinstance(value, datetime) and value.utcoffset() is None:
-                raise ValueError(f"{name} must include a timezone")
+                raise invalid(f"{name} must include a timezone")
         return self
 
 

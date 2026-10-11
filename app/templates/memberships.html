@@ -7,7 +7,9 @@
 
 <div class="card">
   <h2>Your membership <span class="badge {{ {'active': 'paid', 'pending': 'pending', 'expired': 'cancelled', 'cancelled': 'cancelled'}.get(mine.status, 'draft') }}">{{ "Not a member" if mine.status == "none" else mine.status | label }}</span></h2>
-  {% if mine.status == "active" %}
+  {% if mine.permanent %}
+  <p><strong>President: top tier, for as long as you hold the office.</strong> Nothing to pay or renew, and every event ticket is free for you.</p>
+  {% elif mine.status == "active" %}
   <p>{{ mine.plan.name }} · valid until <strong>{{ mine.expires_at | nice_date }}</strong>
     {% if mine.discount_bps %} · {{ "%g" | format(mine.discount_bps / 100) }}% off tickets{% endif %}</p>
   {% elif mine.status == "expired" %}
@@ -34,9 +36,10 @@
   <div class="card">
     <h3>{{ plan.name }} {% if not plan.is_active %}<span class="badge cancelled">Hidden</span>{% endif %}</h3>
     <p class="price">{{ plan.price_paise | paise if plan.price_paise else "Free" }}</p>
-    <p class="muted">{{ plan.validity_days }} days{% if plan.ticket_discount_bps %} · {{ "%g" | format(plan.ticket_discount_bps / 100) }}% off tickets{% endif %}</p>
+    <p class="muted">{{ plan.validity_days }} days</p>
+    <p><span class="badge {{ 'paid' if plan.ticket_discount_bps else 'draft' }}">{{ ("%g" | format(plan.ticket_discount_bps / 100)) ~ "% off every event ticket" if plan.ticket_discount_bps else "No ticket discount" }}</span></p>
     {% if plan.description %}<p>{{ plan.description }}</p>{% endif %}
-    {% if plan.is_active %}
+    {% if plan.is_active and not mine.permanent %}
     <button class="small" data-post="/api/v1/memberships/enroll" data-body='{"plan_id": "{{ plan.id }}"}'
             data-confirm="{{ 'Renew: adds ' ~ plan.validity_days ~ ' days to your current membership once paid.' if mine.status == 'active' else 'Join on this plan. It becomes active once the dues are paid or approved.' }}">
       {{ "Renew on this plan" if mine.status == "active" else "Join on this plan" }}</button>

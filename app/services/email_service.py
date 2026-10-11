@@ -155,6 +155,36 @@ def certificate_email(
                     qr_value=verify_url, filename="certificate-qr.png")
 
 
+def notice_email(*, to: str, full_name: str, club_name: str, subject: str, heading: str, intro: str,
+                 rows: list[tuple[str, str]], button: str, url: str) -> EmailMessage:
+    """A short update about an event someone registered for, in the same colours as the ticket email."""
+    settings = get_settings()
+    sender = settings.mail_from or settings.smtp_user or "no-reply@whodoo.local"
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = formataddr((f"{club_name} via WhoDoo", sender))
+    message["To"] = to
+    message["Message-ID"] = make_msgid(domain="whodoo.local")
+    message.set_content(f"Hi {full_name},\n\n{intro}\n\n" + "\n".join(f"{label}: {value}" for label, value in rows)
+                        + f"\n\n{button}: {url}\n\n{club_name}\n")
+    details = "".join(
+        f'<tr><td style="padding:6px 16px 6px 0;font:600 11px {SANS};letter-spacing:1px;text-transform:uppercase;color:#5b5b55">{escape(label)}</td>'
+        f'<td style="padding:6px 0;font:600 15px {SANS};color:{INK}">{escape(value)}</td></tr>' for label, value in rows)
+    message.add_alternative(f"""<!doctype html><html><body style="margin:0;padding:0;background:{INK}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{INK}"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;background:{CREAM};border:3px solid {INK};border-radius:22px;overflow:hidden">
+  <tr><td style="background:{BUTTER};border-bottom:3px solid {INK};padding:14px 22px;font:400 20px {HEAVY};text-transform:uppercase;color:{INK}">{escape(club_name)}</td></tr>
+  <tr><td style="padding:28px 26px 10px">
+    <h1 style="margin:0 0 10px;font:400 32px/1 {HEAVY};text-transform:uppercase;color:{INK}">{escape(heading)}</h1>
+    <p style="margin:0 0 18px;font:400 15px/1.5 {SANS};color:#3a3a36">Hi {escape(full_name)}, {escape(intro)}</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px">{details}</table>
+  </td></tr>
+  <tr><td align="center" style="padding:0 26px 26px"><a href="{escape(url)}" style="display:inline-block;padding:13px 26px;background:{INK};border-radius:999px;font:700 13px {SANS};letter-spacing:0.6px;text-transform:uppercase;color:{PAPER};text-decoration:none">{escape(button)}</a></td></tr>
+  <tr><td style="background:{PAPER};border-top:3px solid {INK};padding:14px 22px;font:400 12px {SANS};color:#5b5b55">Your ticket and its QR code are unchanged. Sent by WhoDoo for {escape(club_name)}.</td></tr>
+</table></td></tr></table></body></html>""", subtype="html")
+    return message
+
+
 def _to_outbox(message: EmailMessage) -> Path:
     folder = Path(get_settings().mail_outbox_dir)
     folder.mkdir(parents=True, exist_ok=True)

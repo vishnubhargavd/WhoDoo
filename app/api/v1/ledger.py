@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.dependencies import CurrentUser, get_db, require_finance_admin
+from app.core.dependencies import CurrentUser, get_current_user, get_db, require_finance_admin
 from app.core.errors import not_found
 from app.schemas.ledger import (
     EventProfitLoss,
@@ -38,9 +38,10 @@ async def ledger_entries(
 
 @router.get("/events/{event_id}/cash-flow")
 async def event_cash_flow(
-    event_id: uuid.UUID, user: CurrentUser = Depends(require_finance_admin), db: AsyncSession = Depends(get_db)
+    event_id: uuid.UUID, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ) -> dict:
-    """Money in and out for one event, against its budget. Amounts in rupees; the budget in paise."""
+    """Money in and out for one event, against its budget. The president and treasurer for any event,
+    a lead for their own. Amounts in rupees; the budget in paise."""
     flow = await cashflow_service.event_cash_flow(db, user, event_id)
     return {
         "event_id": flow["event"].id, "event_name": flow["event"].name,

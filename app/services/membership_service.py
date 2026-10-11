@@ -181,7 +181,20 @@ async def expire_lapsed(session: AsyncSession, club_id: uuid.UUID, now: datetime
 
 async def my_membership(session: AsyncSession, user: CurrentUser, now: datetime | None = None) -> MembershipOut:
     now = now or utcnow()
-    return await _present(session, user, await _standing(session, user.id, user.club_id), now)
+    out = await _present(session, user, await _standing(session, user.id, user.club_id), now)
+    if user.role == "president":
+        # The president is a member at the top tier until they leave the office: never pending,
+        # never expired, every event free. Nothing is bought, so there is no term to run out.
+        out.status, out.permanent, out.discount_bps = "active", True, 10000
+        out.awaiting = out.awaiting_plan = out.new_expires_at = None
+        out.amount_due_paise = 0
+    return out
+
+
+async def keep_president_a_member(session: AsyncSession, user) -> None:
+    """The president always has member standing (which merchandise pricing reads)."""
+    if user.role == "president" and not user.is_active_member:
+        await session.execute(update(User).where(User.id == user.id).values(is_active_member=True))
 
 
 async def list_members(session: AsyncSession, user: CurrentUser, now: datetime | None = None) -> list[MembershipOut]:

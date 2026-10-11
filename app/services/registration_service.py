@@ -34,6 +34,7 @@ from app.core.dependencies import CurrentUser
 from app.core.errors import AppError, bad_request, conflict, forbidden, not_found
 from app.db.database import SessionLocal
 from app.models.crewpulse import CrewTask
+from app.models.membercore import Membership, MembershipPlan
 from app.models.registration import LIVE, EventRegistration, Venue
 from app.models.shared import Club, Event, User
 from app.schemas.registration import PublicEventOut, RegistrationCheckoutOut, RegistrationIn, RegistrationOut
@@ -120,6 +121,48 @@ async def participant_user_ids(db: AsyncSession, event_id: uuid.UUID, club_id: u
         )
     )
     return set(rows)
+
+
+async def price_for(db: AsyncSession, event: Event, user: CurrentUser | None, now: datetime | None = None) -> dict:
+    """What this person pays for a place, and why.
+
+    Signed out, or from another club: the event's price. A member of the event's club with an
+    active membership: the price less their tier's discount (the rate their current term was
+    bought with). The president: nothing, always. A name or email typed into the form never
+    earns a discount; only the signed-in account does.
+    """
+    now = now or utcnow()
+    full = event.price_paise if event.registration_mode == "paid" else 0
+    offer = {"full_paise": full, "price_paise": full, "discount_bps": 0, "tier": None, "reason": None}
+    if not full or user is None or user.club_id != event.club_id:
+        return offer
+    if user.role == "president":
+        return {**offer, "price_paise": 0, "discount_bps": 10000, "tier": "President", "reason": "The president's place is always free."}
+    row = (await db.execute(
+        select(Membership, MembershipPlan.name)
+        .join(MembershipPlan, MembershipPlan.id == Membership.plan_id)
+        .where(Membership.user_id == user.id, Membership.club_id == event.club_id)
+    )).first()
+    if row is None:
+        return offer
+    membership, plan = row
+    if membership.status != "active" or not (membership.starts_at <= now < membership.expires_at):
+        return {**offer, "reason": f"Your {plan} membership is not active, so the full price applies."}
+    bps = membership.discount_bps_snapshot
+    if not bps:
+        return {**offer, "tier": plan}
+    price = (full * (10000 - bps) + 5000) // 10000
+    return {**offer, "price_paise": price, "discount_bps": bps, "tier": plan,
+            "reason": f"{plan} membership: {bps / 100:g}% off."}
+
+
+async def my_registrations(db: AsyncSession, user: CurrentUser) -> list[dict]:
+    """The signed-in person's own places at events, newest first, each with its ticket link."""
+    rows = (await db.execute(
+        select(R, Event).join(Event, Event.id == R.event_id)
+        .where(R.user_id == user.id, R.status.in_(LIVE)).order_by(Event.starts_at.desc())
+    )).all()
+    return [{"registration": r, "event": e, "ticket_path": "/ticket/" + link_token(r.id)} for r, e in rows]
 
 
 def _state(event: Event, taken: int, now: datetime) -> str:
@@ -225,8 +268,9 @@ async def register(
 ) -> tuple[EventRegistration, Event]:
     """Take a place for this person, if one is left. Free events confirm at once; paid ones hold the place.
 
-    `user` is whoever is signed in, if anyone; the price is the same for everybody. Someone with a
-    task on the event is crew, not a participant, and is refused."""
+    `user` is whoever is signed in, if anyone. A member of the event's club pays their tier's price
+    and the president pays nothing (price_for). Someone with a task on the event is crew, not a
+    participant, and is refused."""
     now = now or utcnow()
     if data.website:
         raise bad_request("registration_refused", "This registration could not be accepted.")
@@ -270,7 +314,10 @@ async def register(
             {"max_participants": limit, "registered": taken},
         )
 
-    paid = event.registration_mode == "paid"
+    # The price is worked out here from the event and the signed-in person's own membership.
+    # Nothing in the request can lower it; signed out, it is always the full price.
+    offer = await price_for(db, event, user, now)
+    paid = offer["price_paise"] > 0
     registration_id = uuid.uuid4()
     number = (await db.scalar(select(func.max(R.participant_no)).where(R.event_id == event.id)) or 0) + 1
     registration = EventRegistration(
@@ -278,7 +325,7 @@ async def register(
         participant_code="WD-" + base64.b32encode(secrets.token_bytes(5)).decode()[:6],
         full_name=data.full_name, phone=data.phone, email=data.email, student_id=data.student_id,
         status="pending_payment" if paid else "registered",
-        amount_paise=event.price_paise if paid else 0, currency="INR",
+        amount_paise=offer["price_paise"], currency="INR",
         user_id=user.id if user is not None and user.club_id == event.club_id else None,
         hold_expires_at=now + timedelta(seconds=get_settings().registration_hold_seconds) if paid else None,
         credential_digest=gatesync_service.digest_of(gatesync_service.credential_for(registration_id)),
@@ -593,3 +640,33 @@ async def purge_if_due(db: AsyncSession, now: datetime | None = None) -> None:
     await db.commit()
     if removed:
         logger.info("Deleted %s registrations past their retention period", removed)
+
+
+# --- Telling participants about a change ------------------------------------------------
+
+
+async def notify_participants(event_id: uuid.UUID, heading: str, intro: str) -> int:
+    """Email everyone holding a place at the event that something about it changed. Runs after the
+    response, on its own session; a mail failure never undoes the change. Returns how many were written."""
+    try:
+        async with SessionLocal() as session:
+            event = await session.get(Event, event_id)
+            if event is None:
+                return 0
+            club = await session.get(Club, event.club_id)
+            lead = await session.get(User, event.lead_id) if event.lead_id else None
+            people = list(await session.scalars(select(R).where(R.event_id == event.id, R.status.in_(("registered", "pending_payment")))))
+            when = f"{event.starts_at.astimezone(IST):%a %d %b %Y, %I:%M %p} IST" if event.starts_at else "To be announced"
+            for person in people:
+                message = email_service.notice_email(
+                    to=person.email, full_name=person.full_name, club_name=club.name,
+                    subject=f"Update: {event.name}", heading=heading, intro=intro,
+                    rows=[("Event", event.name), ("When", when), ("Where", event.venue or "To be announced"),
+                          ("Organised by", lead.full_name if lead else "The club"), ("Your participant ID", person.participant_code)],
+                    button="Open your ticket", url=ticket_url(person.id),
+                )
+                await run_in_threadpool(email_service.deliver, message)
+            return len(people)
+    except Exception:
+        logger.exception("Could not notify participants of event %s", event_id)
+        return 0

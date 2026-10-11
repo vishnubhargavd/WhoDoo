@@ -63,6 +63,8 @@ class MembershipOut(BaseModel):
     awaiting_plan: PlanOut | None = None
     amount_due_paise: int = 0
     new_expires_at: datetime | None = None
+    # The president: the top tier for as long as they hold the office. Nothing to buy or renew.
+    permanent: bool = False
 
 
 class MembershipCheckoutOut(BaseModel):

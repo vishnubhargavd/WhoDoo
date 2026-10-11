@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from app.schemas.events import invalid
 
 
 class _In(BaseModel):
@@ -27,7 +28,7 @@ class ProfileUpdate(_In):
         digits = value.replace(" ", "").replace("-", "")
         if not (digits.lstrip("+").isdigit() and 10 <= len(digits.lstrip("+")) <= 15 and digits.count("+") <= 1
                 and (not digits.count("+") or digits.startswith("+"))):
-            raise ValueError("Enter a phone number of 10 to 15 digits, optionally starting with +")
+            raise invalid("Enter a phone number of 10 to 15 digits, optionally starting with +")
         return digits
 
     @field_validator("display_name", "department")

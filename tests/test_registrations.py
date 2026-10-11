@@ -410,61 +410,111 @@ async def test_participants_are_deleted_after_the_retention_period(client, world
     assert await db.scalar(select(func.count()).select_from(LedgerEntry).where(LedgerEntry.source_module == "event_ticket")) == 1
 
 
-# --- Club users: a participant is not crew, and crew are not participants -------------------
+# --- Events are for people outside the club ---------------------------------------------------
 
 
 async def register_as(client, auth, user, event_id, n):
     return await client.post(f"{API}/public/events/{event_id}/register", json=person(n), headers=auth(user))
 
 
-async def test_a_participant_is_not_given_tasks_and_crew_cannot_register(client, world, auth, db):
-    event_id = await make_event(client, auth, world)
-    tasks = f"{API}/events/{event_id}/tasks"
-    # Vik has a task, so he is crew: he cannot also take a participant's place.
-    made = await client.post(tasks, json={"title": "Set up chairs", "assignee_id": str(world.volunteer.id)}, headers=auth(world.lead))
-    assert made.status_code == 201, made.text
-    crew = await register_as(client, auth, world.volunteer, event_id, 1)
-    assert (crew.status_code, code(crew)) == (409, "has_tasks")
-    by_email = await register(client, event_id, 2, email=world.volunteer.email)             # not signed in, same person
-    assert code(by_email) == "has_tasks"
-
-    # Mia registers to attend: from then on neither the lead nor the president can give her a task.
-    assert (await register_as(client, auth, world.member, event_id, 3)).status_code == 201
-    for boss in (world.lead, world.president):
-        refused = await client.post(tasks, json={"title": "Sell tickets", "assignee_id": str(world.member.id)}, headers=auth(boss))
-        assert (refused.status_code, code(refused)) == (409, "assignee_is_participant")
-    moved = await client.patch(f"{API}/tasks/{made.json()['id']}", json={"assignee_id": str(world.member.id)}, headers=auth(world.president))
-    assert (moved.status_code, code(moved)) == (409, "assignee_is_participant")
-    # Omar registered without signing in, with the email the club knows him by: the same rule.
-    assert (await register(client, event_id, 4, email=world.outsider.email)).status_code == 201
-    refused = await client.post(tasks, json={"title": "Posters", "assignee_id": str(world.outsider.id)}, headers=auth(world.lead))
-    assert code(refused) == "assignee_is_participant"
-    # It is about this event only.
-    other = await make_event(client, auth, world, name="Other Night")
-    assert (await client.post(f"{API}/events/{other}/tasks", json={"title": "Sell tickets", "assignee_id": str(world.member.id)},
-                              headers=auth(world.lead))).status_code == 201
-    # If the organiser removes her as a participant she can be given tasks again.
-    registration_id = await db.scalar(select(R.id).where(R.user_id == world.member.id))
-    await client.post(f"{API}/events/registrations/{registration_id}/cancel", headers=auth(world.lead))
-    # (She now holds a task at the other event at the same time, which the clash review flags:
-    # a different rule, and one the organiser may override with a reason.)
-    again = {"title": "Sell tickets", "assignee_id": str(world.member.id)}
-    flagged = await client.post(tasks, json=again, headers=auth(world.lead))
-    assert (flagged.status_code, code(flagged)) == (409, "assignment_conflicts")
-    assert (await client.post(tasks, json={**again, "override_reason": "Covering both evenings"}, headers=auth(world.lead))).status_code == 201
+async def member_on(client, auth, world, user, discount_bps, name) -> None:
+    """Give `user` an active membership on a tier with this ticket discount."""
+    plan = (await client.post(f"{API}/memberships/plans", headers=auth(world.treasurer),
+                              json={"name": name, "price_paise": 50000, "validity_days": 365, "ticket_discount_bps": discount_bps})).json()
+    await client.post(f"{API}/memberships/enroll", json={"plan_id": plan["id"]}, headers=auth(user))
+    checkout = (await client.post(f"{API}/memberships/checkout", headers=auth(user))).json()
+    paid = await client.post(f"{API}/memberships/checkout/mock", json={"session_id": checkout["session_id"]}, headers=auth(user))
+    assert paid.json()["outcome"] == "activated", paid.text
 
 
-async def test_tasks_are_allocated_to_members_and_volunteers_who_are_not_attending(client, world, auth, db):
+async def set_term(db, sql: str, **params) -> None:
+    """Move a membership's dates, as time passing would. The database guards an active membership's
+    term against edits, so the guard is lifted for this one statement, in the test database only."""
+    await db.execute(text("ALTER TABLE memberships DISABLE TRIGGER USER"))
+    await db.execute(text(sql), params)
+    await db.execute(text("ALTER TABLE memberships ENABLE TRIGGER USER"))
+    await db.commit()
+
+
+async def test_each_membership_tier_gives_its_own_ticket_price_and_the_president_goes_free(client, world, auth, db):
+    event_id = await make_event(client, auth, world, mode="paid", price=20000, limit=20)
+    await member_on(client, auth, world, world.member, 3000, "Gold")
+    await member_on(client, auth, world, world.outsider, 1500, "Silver")
+    url = f"{API}/public/events/{event_id}/register"
+
+    async def price(n, user=None, **changes):
+        made = await client.post(url, json=person(n, **changes), headers=auth(user) if user else {})
+        assert made.status_code == 201, made.text
+        return made.json()
+
+    assert (await price(1))["amount_paise"] == 20000                                  # signed out: full price
+    # Typing a member's name earns nothing; only the signed-in account does.
+    assert (await price(2, full_name="Mia Member"))["amount_paise"] == 20000
+    gold, silver = await price(3, world.member), await price(4, world.outsider)
+    assert (gold["amount_paise"], silver["amount_paise"]) == (14000, 17000)           # 30% and 15% off
+    assert (await price(5, world.volunteer))["amount_paise"] == 20000                 # in the club, no membership
+    president = await price(6, world.president)
+    assert (president["amount_paise"], president["status"]) == (0, "registered")      # free, and confirmed at once
+    assert (await client.post(url, json=person(7), headers=auth(world.member))).json()["error"]["code"] == "already_registered"
+
+    # What is charged, and what reaches the ledger, is the tier's price.
+    paid = await pay(client, gold)
+    assert paid["outcome"] == "registered"
+    amounts = [str(e.amount) for e in await db.scalars(select(LedgerEntry).where(LedgerEntry.source_module == "event_ticket"))]
+    assert amounts == ["140.00"]
+    # A lapsed membership pays full price again.
+    await set_term(db, "UPDATE memberships SET expires_at = now() - interval '1 day', starts_at = now() - interval '400 days' "
+                       "WHERE user_id = :u", u=world.outsider.id)
+    other = await make_event(client, auth, world, mode="paid", price=20000, limit=20, name="Other Night")
+    lapsed = await client.post(f"{API}/public/events/{other}/register", json=person(8), headers=auth(world.outsider))
+    assert lapsed.json()["amount_paise"] == 20000
+
+    # The pages say so: each person sees their own price, a visitor sees the full one.
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.member.id))
+    mine = (await client.get(f"/e/{other}")).text
+    assert "Your price: ₹140.00" in mine and "Gold membership: 30% off." in mine
+    assert "Your tickets" in (await client.get("/explore")).text
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.president.id))
+    assert "Free for you." in (await client.get(f"/e/{other}")).text
+    assert "top tier, for as long as you hold the office" in (await client.get("/memberships")).text
+    client.cookies.clear()
+    visitor = (await client.get(f"/e/{other}")).text
+    assert "Your price" not in visitor and "sign in</a> first to get your membership discount" in visitor
+
+
+async def test_signing_in_puts_an_expiring_membership_in_the_bell(client, world, auth, db):
+    from app.services import auth_service
+
+    await member_on(client, auth, world, world.member, 3000, "Gold")
+    await auth_service.set_credentials(db, world.member.id, "mia.member", "Soon-To-Lapse-1")
+    await db.execute(text("UPDATE membership_renewal_reminders SET read_at = now()"))
+    # Five days left: inside the week.
+    await db.commit()
+    await set_term(db, "UPDATE memberships SET starts_at = now() - interval '360 days', expires_at = now() + interval '5 days'")
+    signed_in = await client.post(f"{API}/auth/login", json={"username": "mia.member", "password": "Soon-To-Lapse-1"})
+    assert signed_in.status_code == 200
+    feed = (await client.get(f"{API}/me/notifications/feed")).json()
+    soon = [i for i in feed["items"] if i["kind"] == "renewal" and not i["read"]]
+    assert len(soon) == 1 and "expires in 7 days" in soon[0]["title"] and soon[0]["href"] == "/memberships"
+    # Once it has run out, the next sign-in says so, and the member price is gone.
+    await set_term(db, "UPDATE memberships SET expires_at = now() - interval '1 hour'")
+    client.cookies.clear()
+    await client.post(f"{API}/auth/login", json={"username": "mia.member", "password": "Soon-To-Lapse-1"})
+    feed = (await client.get(f"{API}/me/notifications/feed")).json()
+    assert any(i["kind"] == "renewal" and "expired" in i["title"].lower() and not i["read"] for i in feed["items"])
+    assert await db.scalar(text("SELECT is_active_member FROM users WHERE id = :u"), {"u": world.member.id}) is False
+
+
+async def test_tasks_are_allocated_to_members_and_volunteers(client, world, auth, db):
     event_id = await make_event(client, auth, world)
     await client.post(f"{API}/events/{event_id}/tasks", json={"title": "Old task", "assignee_id": str(world.lead2.id)}, headers=auth(world.president))
-    await register_as(client, auth, world.member, event_id, 1)
     client.cookies.set(get_settings().session_cookie, create_access_token(world.lead.id))
     page = (await client.get(f"/events/{event_id}")).text
     assert "Allocate task to" in page and "<label>Owner" not in page
     form = page[page.index("Allocate task to"):]
     offered = form[:form.index("</select>")]
-    assert "Vik Volunteer (Volunteer)" in offered and "Omar Outsider (Member)" in offered
-    assert "Mia Member" not in offered                              # attending this event
+    for name in ("Vik Volunteer (Volunteer)", "Omar Outsider (Member)", "Mia Member (Member)"):
+        assert name in offered
     for officer in ("Priya President", "Tara Treasurer", "Leo Lead", "Lina Lead"):
         assert officer not in offered                                # officers run events; tasks go to members and volunteers
     assert "Lina Lead</option>" in page                             # but whoever already holds a task is still shown on it
@@ -546,3 +596,76 @@ async def test_modules_recorded_as_pending_are_not_applied_twice(db):
     finally:
         await db.execute(text("UPDATE schema_migrations SET name = replace(name, 'pending/', '')"))
         await db.commit()
+
+
+# --- A double-booked lead: hand over, or move, and tell everyone registered --------------------
+
+
+async def test_a_double_booked_lead_can_hand_over_and_participants_are_emailed(client, world, auth, db):
+    first = await make_event(client, auth, world, name="Hack Night")
+    second = await make_event(client, auth, world, name="Quiz Night")           # same lead, same time
+    await register(client, first, 1)
+    await register(client, first, 2)
+    outbox = Path(get_settings().mail_outbox_dir)
+    for path in outbox.glob("*.eml"):
+        path.unlink()
+
+    options = (await client.get(f"{API}/events/{first}/handover", headers=auth(world.lead))).json()
+    assert options["double_booked"] is True
+    free = {lead["full_name"] for lead in options["available_leads"]}
+    assert free == {"Lina Lead", "Priya President"} and options["suggested_slots"] == []
+    assert (await client.get(f"{API}/events/{first}/handover", headers=auth(world.volunteer))).status_code == 403
+
+    # Only someone free at that time can take it; the busy lead cannot.
+    busy = await client.post(f"{API}/events/{second}/handover", json={"lead_id": str(world.lead.id)}, headers=auth(world.president))
+    assert (busy.status_code, code(busy)) == (409, "lead_not_available")
+    done = await client.post(f"{API}/events/{first}/handover", json={"lead_id": str(world.lead2.id)}, headers=auth(world.lead))
+    assert done.status_code == 200 and done.json()["lead_name"] == "Lina Lead"
+    assert (await client.get(f"{API}/events/{first}/handover", headers=auth(world.lead2))).json()["double_booked"] is False
+
+    # Both people registered were told, by email.
+    mails = [email.message_from_bytes(p.read_bytes()) for p in sorted(outbox.glob("*.eml"))]
+    assert sorted(m["To"] for m in mails) == ["student1@college.example", "student2@college.example"]
+    body = next(part for part in mails[0].walk() if part.get_content_type() == "text/plain").get_payload(decode=True).decode()
+    assert "Lina Lead" in body and "Hack Night" in body and "/ticket/" in body
+
+    # When nobody else is free, other times are offered instead, and moving the event emails everyone too.
+    for busy_lead in (world.lead2, world.president):
+        made = await client.post(f"{API}/events", headers=auth(world.president), json={
+            "name": f"Clash {busy_lead.full_name}", "starts_at": (NOW + timedelta(days=3)).isoformat(),
+            "ends_at": (NOW + timedelta(days=3, hours=3)).isoformat(), "lead_id": str(busy_lead.id)})
+        assert made.status_code == 201, made.text
+    stuck = (await client.get(f"{API}/events/{second}/handover", headers=auth(world.lead))).json()
+    assert stuck["available_leads"] == [] and stuck["suggested_slots"]
+    await register(client, second, 3)
+    for path in outbox.glob("*.eml"):
+        path.unlink()
+    slot = stuck["suggested_slots"][0]
+    moved = await client.patch(f"{API}/events/{second}", json={"starts_at": slot["starts_at"], "ends_at": slot["ends_at"]}, headers=auth(world.lead))
+    assert moved.status_code == 200, moved.text
+    notes = [email.message_from_bytes(p.read_bytes()) for p in outbox.glob("*.eml")]
+    assert [m["To"] for m in notes] == ["student3@college.example"] and "Update" in notes[0]["Subject"]
+    page_cookie = create_access_token(world.lead.id)
+    client.cookies.set(get_settings().session_cookie, page_cookie)
+    assert "Hand over" in (await client.get(f"/events/{second}")).text
+
+
+async def test_crew_clashes_page_lists_the_lead_and_venue_clashes_event_pages_show(client, world, auth):
+    first = await make_event(client, auth, world, name="Hack Night")
+    second = await make_event(client, auth, world, name="Quiz Night")           # same lead, same venue, same time
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.president.id))
+    page = (await client.get("/crew/review")).text
+    assert "Events that clash" in page and "Hack Night" in page and "Quiz Night" in page
+    assert "Same lead</span> Leo Lead leads both." in page and "Same venue</span>" in page
+    assert "Hand one over: 2 leads free at that time." in page and f'href="/events/{second}"' in page
+    assert "No two events share a lead" not in page
+    # A lead sees the clashes among their own events; another lead has none to see.
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.lead.id))
+    assert "Leo Lead leads both" in (await client.get("/crew/review")).text
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.lead2.id))
+    assert "No two events share a lead" in (await client.get("/crew/review")).text
+    # Handing one over clears the lead clash (the shared venue is still listed).
+    await client.post(f"{API}/events/{first}/handover", json={"lead_id": str(world.lead2.id)}, headers=auth(world.president))
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.president.id))
+    after = (await client.get("/crew/review")).text
+    assert "Same lead</span>" not in after and "Same venue</span>" in after

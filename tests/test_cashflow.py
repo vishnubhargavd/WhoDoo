@@ -103,7 +103,14 @@ async def test_an_events_cash_flow_adds_up_from_the_ledger(client, db, world, au
         assert shown in page, shown
     assert f'href="/treasurer/events/{event_id}"' in (await client.get(f"/events/{event_id}")).text
     client.cookies.clear()
-    for other in (world.lead, world.volunteer, world.member):
+    # The president and the treasurer see every event; a lead sees the events they lead; nobody else.
+    for allowed in (world.president, world.treasurer, world.lead):
+        assert (await client.get(f"{API}/ledger/events/{event_id}/cash-flow", headers=auth(allowed))).status_code == 200, allowed.full_name
+        client.cookies.set(get_settings().session_cookie, create_access_token(allowed.id))
+        assert (await client.get(f"/treasurer/events/{event_id}")).status_code == 200, allowed.full_name
+        assert f'href="/treasurer/events/{event_id}"' in (await client.get(f"/events/{event_id}")).text, allowed.full_name
+    client.cookies.clear()
+    for other in (world.lead2, world.volunteer, world.member):
         assert (await client.get(f"{API}/ledger/events/{event_id}/cash-flow", headers=auth(other))).status_code == 403
     assert (await client.get(f"{API}/ledger/events/{uuid.uuid4()}/cash-flow", headers=auth(world.treasurer))).status_code == 404
 
@@ -131,6 +138,8 @@ async def test_the_overview_counts_every_source_once(client, db, world, auth):
 
     client.cookies.set(get_settings().session_cookie, create_access_token(world.treasurer.id))
     page = (await client.get("/treasurer")).text
+    assert "built-in method" not in page and overview["merchandise"]["items_sold"] == 0      # a number, shown as one
+    assert '<div class="label">Items sold</div><div class="value">0</div>' in page
     for shown in ("Money generated", "Event registrations and tickets", "Merchandise", "Cash flow by event", "₹1,850.00",
                   f'href="/treasurer/events/{event_id}"'):
         assert shown in page, shown
@@ -200,3 +209,64 @@ async def test_every_product_has_a_picture_and_qr_codes_scale_to_their_box(clien
     svg = gatesync_service.qr_svg("http://192.168.1.24:8000/verify/ABCDEFGHIJKLMNOP")
     head = svg[:svg.index(">")]
     assert "viewBox=" in head and "width=" not in head and "height=" not in head
+
+
+async def test_an_announcement_never_fails_on_a_leftover_event_choice(client, world, auth):
+    url = f"{API}/announcements"
+    # Posting to everyone with an event still selected in the form: the event is simply not used.
+    ok = await client.post(url, headers=auth(world.president), json={
+        "title": "Welcome", "body": "Hello all.", "audience": "everyone", "event_id": str(world.bake_sale.id)})
+    assert ok.status_code == 201, ok.text
+    feed = (await client.get(url, headers=auth(world.member))).json()
+    assert [(a["title"], a["audience"], a["event_id"]) for a in feed] == [("Welcome", "everyone", None)]
+    # An event announcement with no event says so in plain words.
+    missing = await client.post(url, headers=auth(world.president), json={"title": "Bring ID", "body": "Please.", "audience": "event"})
+    assert missing.status_code == 422
+    message = missing.json()["error"]["message"]
+    assert "Pick the event this announcement is for." in message and "Value error" not in message
+    assert (await client.post(url, headers=auth(world.president), json={
+        "title": "Bring ID", "body": "Please.", "audience": "event", "event_id": str(world.bake_sale.id)})).status_code == 201
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.president.id))
+    page = (await client.get("/announcements")).text
+    assert 'id="announce-event" hidden' in page and 'id="announce-audience"' in page
+
+
+async def test_no_validation_message_starts_with_value_error(client, world, auth):
+    """Messages written for people reach them as written, without the library's own prefix."""
+    cases = [
+        ("post", f"{API}/merch/products", world.treasurer, {"name": "Cap", "base_price": "100.00", "member_price": "150.00"}),
+        ("put", f"{API}/me/profile", world.member, {"phone": "12ab"}),
+        ("post", f"{API}/ledger/manual-entry", world.treasurer, {"entry_type": "adjustment", "amount": "10.00", "description": "Fix up"}),
+        ("post", f"{API}/check-in/manual", world.volunteer, {"event_id": str(world.bake_sale.id)}),
+    ]
+    for method, url, who, body in cases:
+        response = await getattr(client, method)(url, headers=auth(who), json=body)
+        assert response.status_code == 422, (url, response.status_code, response.text[:200])
+        assert "Value error" not in response.text, url
+
+
+async def test_every_page_renders_cleanly_for_every_role(client, world, auth, db):
+    """A sweep for silly mistakes: no page may crash, or print a Python object where a value belongs."""
+    event_id = await paid_event(client, auth, world)
+    await register_and_pay(client, event_id, 1)
+    pages = ["/", "/home", "/events", "/explore", f"/events/{event_id}", f"/events/{event_id}/edit", "/events/new", "/my-tasks",
+             "/crew/review", "/check-in", f"/check-in/{event_id}", "/memberships", "/announcements", "/certificates", "/handover",
+             "/profile", "/notifications", "/expenses", "/expenses/new", "/expenses/approvals", "/store", "/orders",
+             "/admin/merch", "/admin/merch/orders", "/treasurer", "/treasurer/ledger", f"/treasurer/events/{event_id}",
+             f"/e/{event_id}", "/verify", "/login"]
+    bad = ("built-in method", "bound method", "<function ", "Traceback", "Undefined", "Internal Server Error", "Value error")
+    for person in (world.president, world.treasurer, world.lead, world.lead2, world.volunteer, world.member, world.outsider, None):
+        client.cookies.clear()
+        if person is not None:
+            client.cookies.set(get_settings().session_cookie, create_access_token(person.id))
+        for path in pages:
+            response = await client.get(path)
+            who = person.full_name if person else "a visitor"
+            assert response.status_code in (200, 303, 403, 404), (who, path, response.status_code)
+            if response.status_code == 200:
+                for marker in bad:
+                    assert marker not in response.text, (who, path, marker)
+    # And the president is never the one turned away.
+    client.cookies.set(get_settings().session_cookie, create_access_token(world.president.id))
+    for path in pages:
+        assert (await client.get(path)).status_code in (200, 303), ("president", path)

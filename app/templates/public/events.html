@@ -4,7 +4,25 @@
 {% block content %}
 <h1>Upcoming events</h1>
 <p class="sub">Open to every student. Pick an event and register: no account needed.
+  {% if user %}Signed in, you pay your membership tier's price; the full price is shown here.{% endif %}
   {% if not user %}Running a club? <a href="/login?next=/events">Sign in</a> to manage your events.{% endif %}</p>
+
+{% if mine %}
+<div class="card">
+  <h2>Your tickets</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Event</th><th>When</th><th>Status</th><th class="num">Paid</th><th></th></tr></thead>
+    <tbody>
+      {% for m in mine %}
+      <tr><td>{{ m.event.name }}</td><td class="nowrap">{{ m.event.starts_at | ist }} IST</td>
+        <td><span class="badge {{ {'registered': 'paid', 'checked_in': 'final'}.get(m.registration.status, 'pending') }}">{{ m.registration.status | label }}</span></td>
+        <td class="num">{{ m.registration.amount_paise | paise if m.registration.amount_paise else "Free" }}</td>
+        <td><a class="button small" href="{{ m.ticket_path }}">{{ "Pay now" if m.registration.status == "pending_payment" else "Open ticket" }}</a></td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endif %}
 
 <div class="card">{% include "_calendar.html" %}</div>
 

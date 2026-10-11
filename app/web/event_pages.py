@@ -101,6 +101,8 @@ async def event_detail_page(
         context.update(
             readiness=await event_service.readiness(db, user, event),
             schedule=await event_service.schedule_check(db, user, event),
+            double_booked=await event_service.lead_is_double_booked(db, event),
+            free_leads=await event_service.available_leads(db, event),
             people=await task_service.assignable_people(db, user.club_id, event.id),
             missing=event_service.missing_for_publish(event) + await venue_service.registration_problems(db, event),
             registrations=await registration_service.list_for_event(db, user, event)

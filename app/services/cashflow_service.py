@@ -51,11 +51,12 @@ def _rupees(paise: int | None) -> Decimal:
 
 async def event_cash_flow(db: AsyncSession, user: CurrentUser, event_id: uuid.UUID) -> dict:
     """Everything that has come in and gone out for one event, against its budget."""
-    if not user.is_finance_admin:
-        raise forbidden("Only the treasurer and the president can see an event's cash flow")
     event = await db.get(Event, event_id)
     if event is None or event.club_id != user.club_id:
         raise not_found("Event")
+    # The president and the treasurer see every event's money; a lead sees the events they lead.
+    if not (user.is_finance_admin or event.lead_id == user.id):
+        raise forbidden("Only the president, the treasurer or this event's lead can see its cash flow")
     here = (E.club_id == event.club_id, E.event_id == event.id)
     paid = E.payment_status == "paid"
     income = (paid, E.entry_type == "income")
@@ -150,7 +151,8 @@ async def overview(db: AsyncSession, club_id: uuid.UUID) -> dict:
         "committed": totals.committed,
         "net": generated - totals.refunds - totals.paid_out,
         "merchandise": {
-            "orders": orders[0], "items": orders[1],
+            # "items_sold", not "items": a template reading .items on a dict gets the dict's own method.
+            "orders": orders[0], "items_sold": int(orders[1]),
             "revenue": next(source["amount"] for source in sources if source["key"] == "merchandise"),
             "refunds": totals.merch_refunds,
         },

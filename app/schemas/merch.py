@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.schemas.common import Money, PositiveMoney
+from app.schemas.events import invalid
 
 OrderPaymentStatus = Literal["created", "pending", "paid", "failed", "refunded"]
 OrderStatus = Literal["created", "paid", "packed", "delivered", "cancelled"]
@@ -58,7 +59,7 @@ class ProductCreate(_Stripped):
     @model_validator(mode="after")
     def member_price_is_a_discount(self):
         if self.member_price > self.base_price:
-            raise ValueError("member price cannot be higher than the base price")
+            raise invalid("member price cannot be higher than the base price")
         return self
 
 

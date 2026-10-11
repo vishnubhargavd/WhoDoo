@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.schemas.events import invalid
+
 Audience = Literal["everyone", "members", "volunteers", "officers", "event"]
 CertificateKind = Literal["participation", "volunteering", "achievement"]
 HandoverRole = Literal["president", "treasurer", "event_lead", "volunteer", "everyone"]
@@ -31,7 +33,7 @@ class ManualCheckIn(BaseModel):
     @model_validator(mode="after")
     def _one(self):
         if (self.ticket_id is None) == (self.registration_id is None):
-            raise ValueError("Give a ticket_id or a registration_id")
+            raise invalid("Give a ticket_id or a registration_id")
         return self
 
 
@@ -47,8 +49,12 @@ class AnnouncementIn(_Clean):
 
     @model_validator(mode="after")
     def _event_goes_with_event_audience(self):
-        if (self.audience == "event") != (self.event_id is not None):
-            raise ValueError("Choose an event for an event announcement, and only for one")
+        # An event left selected while posting to everyone (or members, volunteers, officers) is
+        # simply not used: the audience says who it is for. Only an event announcement needs one.
+        if self.audience != "event":
+            self.event_id = None
+        elif self.event_id is None:
+            raise invalid("Pick the event this announcement is for.")
         return self
 
 

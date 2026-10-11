@@ -17,18 +17,28 @@
 {% if event.registration_state == "open" %}
 <div class="card">
   <h2>{{ "Book your place" if event.registration_mode == "paid" else "Register" }}</h2>
+  {% if offer.discount_bps %}
+  <div class="notice ok"><strong>{{ "Free for you." if not offer.price_paise else "Your price: " ~ (offer.price_paise | paise) ~ "." }}</strong>
+    {{ offer.reason }} <span class="muted">Full price {{ offer.full_paise | paise }}.</span></div>
+  {% elif offer.reason %}
+  <div class="notice info">{{ offer.reason }} <a href="/memberships">Renew your membership</a> to get your discount back.</div>
+  {% elif club_member and event.registration_mode == "paid" %}
+  <div class="notice info">Members get a discount on tickets. <a href="/memberships">See the membership tiers</a>.</div>
+  {% elif not user and event.registration_mode == "paid" %}
+  <p class="muted">Club members: <a href="/login?next=/e/{{ event.id }}">sign in</a> first to get your membership discount.</p>
+  {% endif %}
   <p class="muted">One place per student. Your ticket, a QR code, is emailed to you{% if event.registration_mode == "paid" %} once the payment goes through{% endif %}.</p>
   <form id="register-form" class="stack" data-register="/api/v1/public/events/{{ event.id }}/register" novalidate>
     <div class="fields">
-      <label>Full name <input type="text" name="full_name" required minlength="2" maxlength="120" autocomplete="name"></label>
+      <label>Full name <input type="text" name="full_name" required minlength="2" maxlength="120" autocomplete="name" value="{{ user.full_name if user else '' }}"></label>
       <label>College student ID <input type="text" name="student_id" required maxlength="30" placeholder="e.g. 22CS1045" autocapitalize="characters"></label>
-      <label>Email <input type="email" name="email" required maxlength="200" autocomplete="email" placeholder="The ticket is sent here"></label>
+      <label>Email <input type="email" name="email" required maxlength="200" autocomplete="email" placeholder="The ticket is sent here" value="{{ user.email if user else '' }}"></label>
       <label>Phone <input type="tel" name="phone" required maxlength="20" autocomplete="tel" placeholder="10-digit mobile number"></label>
     </div>
     {# Left empty by people; filled in by form-filling bots. #}
     <div aria-hidden="true" style="position: absolute; left: -9999px"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
     <div class="actions">
-      <button type="submit">{{ "Continue to payment · " ~ (event.price_paise | paise) if event.registration_mode == "paid" else "Register" }}</button>
+      <button type="submit">{{ "Continue to payment · " ~ (offer.price_paise | paise) if offer.price_paise else ("Book my free place" if offer.discount_bps else "Register") }}</button>
     </div>
   </form>
 </div>

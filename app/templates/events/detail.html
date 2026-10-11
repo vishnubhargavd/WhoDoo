@@ -9,9 +9,10 @@
     <p class="sub">{{ event.starts_at | ist }}{% if event.ends_at %} – {{ event.ends_at | ist('%H:%M') }}{% endif %}{% if event.starts_at %} IST{% endif %}
       · {{ event.venue or "No venue yet" }} · Lead: {{ event.lead_name or "unassigned" }}</p>
   </div>
-  {% if organizer %}
+  {% if organizer or user.is_finance_admin %}
   <div class="actions">
-    {% if event.status in ("draft", "published") %}<a class="button secondary" href="/events/{{ event.id }}/edit">Edit</a>{% endif %}
+    {% if user.is_finance_admin or event.lead_id == user.id %}<a class="button secondary" href="/treasurer/events/{{ event.id }}">Cash flow</a>{% endif %}
+    {% if organizer and event.status in ("draft", "published") %}<a class="button secondary" href="/events/{{ event.id }}/edit">Edit</a>{% endif %}
     {% for status in event.allowed_statuses %}
       {% set verbs = {"published": "Publish", "draft": "Back to draft", "cancelled": "Cancel event", "completed": "Mark completed"} %}
       <button class="{{ 'danger' if status == 'cancelled' else 'success' if status in ('published', 'completed') else 'secondary' }}"
@@ -128,6 +129,23 @@
     {% else %}
       <p class="{{ 'empty' if not schedule.checked else '' }}">{{ schedule.message }}</p>
     {% endif %}
+    {# ---- Hand the event to a lead who is free, when this one is double-booked ---- #}
+    {% if event.status in ("draft", "published") and (double_booked or free_leads) %}
+    <h2 style="margin-top: 16px">Hand over {% if double_booked %}<span class="badge failed">Lead double-booked</span>{% endif %}</h2>
+    {% if double_booked %}<p class="muted">{{ event.lead_name }} is leading another event at this time.</p>{% endif %}
+    {% if free_leads %}
+    <p class="muted" style="font-size: 13px">Free at this time. Everyone registered is emailed when the event changes hands.</p>
+    <div class="actions">
+      {% for lead in free_leads %}
+      <button class="small secondary" data-post="/api/v1/events/{{ event.id }}/handover" data-body='{"lead_id": "{{ lead.id }}"}'
+              data-confirm="Hand {{ event.name }} over to {{ lead.full_name }}? Everyone registered will be emailed.">Hand over to {{ lead.full_name }}</button>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="notice info">No other event lead is free at this time. Move the event instead: pick one of the alternative slots above
+      (or edit the date), and everyone registered will be emailed the new time.</div>
+    {% endif %}
+    {% endif %}
     <p class="muted" style="font-size: 12px; margin: 12px 0 0">{{ schedule.scope }}</p>
   </section>
 </div>
@@ -177,7 +195,7 @@
 <section class="card" aria-labelledby="budget-title">
   <div class="actions" style="justify-content: space-between">
     <h2 id="budget-title">Budget {% if budget.over_budget %}<span class="badge failed">Over budget</span>{% endif %}</h2>
-    {% if user.is_finance_admin %}<a class="button secondary small" href="/treasurer/events/{{ event.id }}">Full cash flow</a>{% endif %}
+    {% if user.is_finance_admin or event.lead_id == user.id %}<a class="button secondary small" href="/treasurer/events/{{ event.id }}">Full cash flow</a>{% endif %}
   </div>
   {% if budget.warning %}<div class="notice {{ 'error' if budget.over_budget else 'info' }}">{{ budget.warning }} Nothing is blocked; this is a warning.</div>{% endif %}
   <div class="meta">

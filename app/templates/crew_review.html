@@ -2,13 +2,38 @@
 {% block title %}Crew clashes · WhoDoo{% endblock %}
 {% block content %}
 <h1>Crew clashes</h1>
-<p class="sub">Volunteers holding duplicate tasks, or duties that overlap, across {{ "every open event" if user.role == "president" else "the events you lead" }}.
+<p class="sub">Events that share a lead or a venue at the same time, and volunteers holding duplicate tasks or duties that overlap, across {{ "every open event" if user.role == "president" else "the events you lead" }}.
   New assignments are checked as they are made; this is what is standing right now.</p>
 {% set names = {"exact_duplicate": "Exact duplicate", "near_duplicate": "Near duplicate", "overlapping_shift": "Overlapping shifts",
                 "event_clash": "Two events at once", "over_limit": "Too many tasks"} %}
 
 <div class="card">
-  <h2>Needs a look <span class="badge {{ 'failed' if flagged else 'paid' }}">{{ flagged | length }}</span></h2>
+  <h2>Events that clash <span class="badge {{ 'failed' if event_clashes else 'paid' }}">{{ event_clashes | length }}</span></h2>
+  <p class="muted">Two events at the same time with the same lead, or in the same venue. The same clashes each event's page shows.</p>
+  {% if event_clashes %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Events</th><th>When</th><th>What clashes</th><th>What to do</th><th></th></tr></thead>
+    <tbody>
+      {% for c in event_clashes %}
+      <tr>
+        <td><a href="/events/{{ c.first.id }}">{{ c.first.name }}</a><br><a href="/events/{{ c.second.id }}">{{ c.second.name }}</a></td>
+        <td class="nowrap">{{ c.first.starts_at | ist('%d %b, %H:%M') }}–{{ c.first.ends_at | ist('%H:%M') }}<br>{{ c.second.starts_at | ist('%d %b, %H:%M') }}–{{ c.second.ends_at | ist('%H:%M') }}</td>
+        <td>{% if "lead" in c.kinds %}<p style="margin: 0 0 4px"><span class="badge failed">Same lead</span> {{ c.lead_name }} leads both.</p>{% endif %}
+          {% if "venue" in c.kinds %}<p style="margin: 0"><span class="badge pending">Same venue</span> Both are in {{ c.venue }}.</p>{% endif %}</td>
+        <td>{% if "lead" in c.kinds %}{% if c.free_leads %}Hand one over: {{ c.free_leads }} lead{{ "" if c.free_leads == 1 else "s" }} free at that time.{% else %}Nobody else is free then: move one event.{% endif %}
+          {% else %}Move one event, or change its venue.{% endif %}</td>
+        <td><a class="button small secondary" href="/events/{{ c.second.id }}">Resolve</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="empty">No two events share a lead or a venue at the same time.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Volunteer tasks that clash <span class="badge {{ 'failed' if flagged else 'paid' }}">{{ flagged | length }}</span></h2>
   {% if flagged %}
   <div class="table-wrap"><table>
     <thead><tr><th>Volunteer</th><th>Task</th><th>Event</th><th>What is wrong</th><th></th></tr></thead>
@@ -29,7 +54,7 @@
   </table></div>
   <p class="muted">To fix one, open the event and give the task to someone else, or remove the duplicate.</p>
   {% else %}
-  <p class="empty">No duplicates and no clashes. Everyone's duties fit.</p>
+  <p class="empty">No duplicate tasks and no overlapping duties among volunteers.</p>
   {% endif %}
 </div>
 

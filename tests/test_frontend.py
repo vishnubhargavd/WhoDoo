@@ -128,7 +128,7 @@ def test_navigation_is_role_aware(monkeypatch):
         return {section["title"]: [link["label"] for link in section["links"]] for section in nav["sections"]}
 
     assert links("member") == {
-        "Events": ["Events", "My tasks", "Register for events"], "Me": ["Profile"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"]}
+        "Events": ["Events", "My tasks", "Book events"], "Me": ["Profile"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"]}
     assert links("event_lead")["Expenses"] == ["My expenses", "Submit expense", "Approvals"]
     assert "Finance" not in links("event_lead")
     assert links("treasurer")["Finance"] == ["Dashboard", "Ledger"]
@@ -150,11 +150,18 @@ def test_navigation_is_role_aware(monkeypatch):
 
     monkeypatch.setattr(modules, "_tables", frozenset(modules.MODULES))   # every module migrated
     monkeypatch.setattr(modules, "_looked_at", time.monotonic())   # just looked: no re-check yet
-    assert links("member")["Tickets"] == ["Book tickets", "My tickets"]              # the door is for door staff
-    assert links("volunteer")["Tickets"] == ["Book tickets", "My tickets", "Check-in"]
+    assert links("member")["Tickets"] == ["Book tickets", "My tickets"]              # only because the tests switch FairSeat on
+    assert "Check-in" not in links("member")["Events"]                               # the door is for door staff
+    assert links("volunteer")["Events"] == ["Events", "My tasks", "Book events", "Check-in"]
     assert links("member")["Club"] == ["Memberships", "Announcements", "Certificates", "Handover"]
-    assert active("volunteer", "/check-in/some-event") == ("Tickets", "Check-in")
+    assert active("volunteer", "/check-in/some-event") == ("Events", "Check-in")
     assert navigation(Person("member"), "/")["coming_soon"] == ()
+
+    # As shipped, FairSeat is off: club members get no ticket booking, and it is not listed as "soon" either.
+    monkeypatch.setattr(get_settings(), "fairseat_enabled", False)
+    assert "Tickets" not in links("member") and "Tickets" not in links("president")
+    assert "Tickets" not in navigation(Person("member"), "/")["coming_soon"]
+    assert links("volunteer")["Events"][-1] == "Check-in"                            # the door still works
 
 
 async def test_shell_marks_the_current_section_and_hides_what_you_cannot_use(client, world):

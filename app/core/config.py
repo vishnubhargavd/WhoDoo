@@ -63,15 +63,16 @@ class Settings(BaseSettings):
     # CrewPulse: most unfinished tasks one person may hold before an assignment is flagged (0 = no limit).
     crew_max_open_tasks: int = Field(0, ge=0, le=100)
 
-    # FairSeat ticket booking. On by default; FAIRSEAT_ENABLED=0 makes its routes answer 404.
-    # With demo sign-in anyone can act as anyone, so it may only be on against a local database.
-    fairseat_enabled: bool = True
+    # FairSeat: ticket booking for signed-in club users. OFF: club members do not book tickets.
+    # Events are for people outside the club, who register without an account (registration_service).
+    # FAIRSEAT_ENABLED=1 brings the member booking pages and routes back.
+    fairseat_enabled: bool = False
     fairseat_hold_seconds: int = 600
     fairseat_quote_seconds: int = 300
     fairseat_max_per_booking: int = 6
     fairseat_max_per_purchaser: int = 6
-    # Ticket payments are a second switch, also on by default.
-    fairseat_payments_enabled: bool = True
+    # Ticket payments are a second switch, used only when FairSeat itself is on.
+    fairseat_payments_enabled: bool = False
     # Where the payment provider sends a ticket buyer back to. Blank = this app's /tickets/return page.
     fairseat_return_url: str = ""
     # Signs the QR code on each ticket. Blank = JWT_SECRET, which is only acceptable when this

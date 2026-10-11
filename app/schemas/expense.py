@@ -5,6 +5,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.common import Money, ORMModel, PositiveMoney
+from app.schemas.events import invalid
 
 ExpenseCategory = Literal["supplies", "food", "travel", "printing", "decoration", "prizes", "goodies", "other"]
 ClaimStatus = Literal["draft", "pending_approval", "approved", "rejected", "change_requested", "paid"]
@@ -72,7 +73,7 @@ class _ClaimFields(BaseModel):
     @classmethod
     def not_in_the_future(cls, value: date) -> date:
         if value > date.today():
-            raise ValueError("expense date cannot be in the future")
+            raise invalid("expense date cannot be in the future")
         return value
 
 

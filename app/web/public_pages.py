@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_db, get_optional_user
 from app.core.errors import AppError
+from app.models.shared import Event
 from app.services import payment_service, registration_service
 from app.web.templating import render
 
@@ -23,7 +24,8 @@ async def calendar_data(db: AsyncSession) -> list[dict]:
 async def public_events_page(request: Request, user: CurrentUser | None, db: AsyncSession):
     await registration_service.purge_if_due(db)
     return render(request, "public/events.html", user, events=await registration_service.public_events(db),
-                  calendar=await calendar_data(db))
+                  calendar=await calendar_data(db),
+                  mine=await registration_service.my_registrations(db, user) if user else [])
 
 
 @router.get("/explore")
@@ -37,7 +39,13 @@ async def public_event(
     event_id: uuid.UUID, request: Request, user: CurrentUser | None = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return render(request, "public/event.html", user, event=await registration_service.public_event(db, event_id))
+    event = await registration_service.public_event(db, event_id)
+    row = await db.get(Event, event_id)
+    # The price shown is this person's own: their membership tier's, the president's free place,
+    # or the full price for anyone signed out.
+    return render(request, "public/event.html", user, event=event,
+                  offer=await registration_service.price_for(db, row, user),
+                  club_member=user is not None and user.club_id == row.club_id)
 
 
 @router.get("/ticket/{token}")

@@ -42,14 +42,14 @@ async def seed(session) -> None:
     treasurer = acting(next(u for u in people if u.role == "treasurer"))
 
     await membership_service.create_plan(session, treasurer, PlanIn(
-        name="Annual member", description="A year of member prices on tickets and merchandise.",
-        price_paise=50000, validity_days=365, ticket_discount_bps=2000))
+        name="Gold · Annual", description="The top tier you can buy: 30% off every event ticket and member prices in the store, for a year.",
+        price_paise=50000, validity_days=365, ticket_discount_bps=3000))
     await membership_service.create_plan(session, treasurer, PlanIn(
-        name="Semester member", description="One semester.", price_paise=30000, validity_days=180,
-        ticket_discount_bps=1000))
+        name="Silver · Semester", description="15% off every event ticket and member prices in the store, for one semester.",
+        price_paise=30000, validity_days=180, ticket_discount_bps=1500))
     await membership_service.create_plan(session, treasurer, PlanIn(
-        name="Honorary", description="For alumni and guests. Approved by the president.", price_paise=0,
-        validity_days=365, ticket_discount_bps=1000))
+        name="Bronze · Honorary", description="For alumni and guests, approved by the president: 5% off every event ticket.",
+        price_paise=0, validity_days=365, ticket_discount_bps=500))
 
     now = datetime.now(timezone.utc)
     upcoming = list(await session.scalars(
@@ -59,7 +59,7 @@ async def seed(session) -> None:
         .order_by(Event.starts_at).limit(2)
     ))
     ticketed = []
-    if "tickets" in found or modules.migrated("tickets"):
+    if "tickets" in found:   # member ticket booking is off unless FAIRSEAT_ENABLED=1
         for event, (general, vip) in zip(upcoming, ((15000, 40000), (0, 25000))):
             if await ticket_service.get_settings_row(session, event.id) is not None:
                 continue
