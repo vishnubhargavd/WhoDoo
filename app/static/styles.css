@@ -141,6 +141,12 @@ code { font-size: 0.9em; background: var(--gray-bg); padding: 1px 6px; border-ra
   color: var(--ink); white-space: nowrap;
   transition: background var(--fast), color var(--fast), border-color var(--fast);
 }
+/* With every module on there are eight sections plus the bell: tighten them on mid-width screens
+   so the bar stays on one line. */
+@media (min-width: 900px) and (max-width: 1320px) {
+  .sections { gap: 2px; }
+  .sections a { padding: 0 10px; font-size: 12px; }
+}
 .sections a:hover { border-color: var(--ink); background: var(--paper); }
 .sections a.active { background: var(--ink); color: var(--paper); }
 
@@ -243,7 +249,12 @@ code { font-size: 0.9em; background: var(--gray-bg); padding: 1px 6px; border-ra
 .container > .actions > div:first-child > .sub { margin-bottom: 0; }
 .grid:has(> .stat) { grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
 form.stack, .stack { display: grid; gap: 14px; }
-.fields { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); align-items: start; }
+/* Columns never go narrower than a date-and-time picker needs, and a control fills its column
+   rather than spilling into the next one. */
+.fields, .form-row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); align-items: start; }
+.fields > label, .form-row > label { min-width: 0; }
+.fields input, .fields select, .form-row input, .form-row select { min-width: 0; box-sizing: border-box; }
+.fields input[type="checkbox"], .fields input[type="radio"] { width: 18px; }
 
 /* --- Cards --------------------------------------------------------------------- */
 .card {
@@ -569,15 +580,255 @@ button.brand-mark:hover { transform: scale(1.06); box-shadow: none; }
 .scan-result.ok { background: var(--green-bg); }
 .scan-result.warn { background: var(--amber-bg); }
 .scan-result.bad { background: var(--coral); }
-#scan-video { width: 100%; max-width: 420px; border-radius: 16px; border: 2px solid var(--ink); }
+/* The door: the camera view with a square to aim at, the count, and the guest-list filters. */
+.scan-frame { position: relative; width: 100%; max-width: 420px; margin-top: 12px; border: 2px solid var(--ink); border-radius: 16px; overflow: hidden; background: var(--ink); line-height: 0; }
+#scan-video { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+.scan-target { position: absolute; inset: 18%; border: 3px solid var(--butter); border-radius: 14px; box-shadow: 0 0 0 100vmax rgba(8, 8, 8, 0.35); pointer-events: none; }
+.door-count p { margin: 0 0 8px; font-size: 1.05rem; }
+.door-count strong { font: 400 2.4rem/1 var(--font-display); }
+[data-guest-filter][aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 .announcement.unread { border-left: 8px solid var(--cobalt); }
 .announcement p.body, .note-body { white-space: pre-wrap; }
-.certificate { border: 3px double var(--ink); border-radius: 12px; padding: 40px 28px; text-align: center; background: #fff; }
-.certificate h1 { font-size: 2rem; margin: 6px 0 18px; }
-.certificate .name { font-size: 2.2rem; font-weight: 800; margin: 12px 0; }
-.certificate svg { width: 120px; height: auto; }
-.certificate.revoked { opacity: .6; }
-@media print {
-  .topbar, .subnav, .footer, .no-print, #flash { display: none !important; }
-  .certificate { border-width: 6px; page-break-inside: avoid; }
+/* Certificate: the site's own look on one sheet. Cream paper, ink rules, the display face, and a
+   single accent that follows the kind. The QR code sits on white in its own box so it scans. */
+.certificate {
+  --accent: var(--cobalt); --accent-ink: #fff;
+  max-width: 980px; margin: 0 auto; background: var(--cream); color: var(--ink);
+  border: 3px solid var(--ink); border-radius: var(--radius-lg); box-shadow: var(--shadow-pop); overflow: hidden;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
 }
+.certificate.kind-volunteering { --accent: var(--coral); }
+.certificate.kind-achievement { --accent: var(--mint); --accent-ink: var(--ink); }
+.cert-top {
+  display: flex; align-items: center; gap: 12px; padding: 14px 22px; border-bottom: 3px solid var(--ink); background: var(--paper);
+}
+.cert-mark {
+  display: grid; place-items: center; width: 40px; height: 40px; flex: none; border: var(--rule); border-radius: 50%;
+  background: var(--butter); font: 400 22px/1 var(--font-display);
+}
+.cert-club { font: 400 22px/1 var(--font-display); letter-spacing: 0.02em; text-transform: uppercase; }
+.cert-kind {
+  margin-left: auto; padding: 7px 14px; border: var(--rule); border-radius: 999px; background: var(--accent); color: var(--accent-ink);
+  font: 700 11px/1 var(--font-sans); letter-spacing: 0.1em; text-transform: uppercase;
+}
+.cert-body { padding: 40px 32px 30px; text-align: center; }
+.certificate h1 {
+  margin: 0; font: 400 clamp(2.4rem, 7vw, 4.6rem)/0.92 var(--font-display); letter-spacing: 0.01em; text-transform: uppercase;
+}
+.cert-lead { margin: 26px 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.cert-name { margin: 0; font: 400 clamp(1.8rem, 5vw, 3.2rem)/1.1 var(--font-display); text-transform: uppercase; }
+/* A highlighter stroke under the name, in the site's butter yellow. */
+.cert-name span { padding: 0 0.25em; background: linear-gradient(transparent 58%, var(--butter) 58%); box-decoration-break: clone; -webkit-box-decoration-break: clone; }
+.cert-title { margin: 20px auto 0; max-width: 40rem; font-size: 1.2rem; font-weight: 600; }
+.cert-note { margin: 6px auto 0; max-width: 40rem; color: var(--muted); }
+.cert-revoked { margin: 18px 0 0; }
+.cert-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 24px; flex-wrap: wrap;
+  padding: 18px 22px; border-top: 3px solid var(--ink); background: var(--paper);
+}
+.cert-issued { display: grid; gap: 4px; padding-top: 10px; border-top: 2px solid var(--ink); min-width: 200px; }
+.cert-issued strong { font-size: 15px; }
+.cert-issued span, .cert-code span { font-size: 12px; color: var(--muted); }
+.cert-verify { display: flex; align-items: center; gap: 14px; }
+/* The box is a fixed square and the code fills it, so it cannot drift or stretch. */
+.cert-qr { width: 112px; height: 112px; flex: none; padding: 6px; background: #fff; border: var(--rule); border-radius: var(--radius-sm); line-height: 0; }
+.cert-qr svg { display: block; width: 100%; height: 100%; }
+.cert-code { display: grid; gap: 2px; text-align: left; }
+.cert-code strong { font: 600 11px/1.2 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; }
+.cert-code code { font: 600 15px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.06em; }
+.certificate.revoked .cert-body { opacity: 0.55; }
+@media (max-width: 640px) {
+  .cert-body { padding: 28px 18px 22px; }
+  .cert-foot { justify-content: center; text-align: center; }
+  .cert-issued { justify-items: center; }
+}
+/* Printing (or "Save as PDF"). The page shell is built for a screen: a black frame at least one
+   screen tall, a rounded cream panel, an entrance animation. Left in place it prints a black page
+   and pushes the content onto the next one, so print strips the shell.
+   Pages are A4 portrait unless a document asks otherwise: the certificate asks for landscape by
+   name, so a ticket or any other page is not turned sideways with it. */
+.print-only { display: none; }
+@page { size: A4 portrait; margin: 14mm; }
+@page certificate { size: A4 landscape; margin: 10mm; }
+@media print {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+  html, body { background: #fff !important; height: auto; }
+  .frame { display: block; min-height: 0; padding: 0; gap: 0; }
+  .panel { background: #fff; border-radius: 0; overflow: visible; }
+  .container { max-width: none; margin: 0; padding: 0; }
+  .topbar, .subnav, .footer, .no-print, .screen-only, #flash, .bell-wrap, .menu-wrap { display: none !important; }
+  .print-only { display: block; }
+
+  /* The certificate: one landscape sheet. Its height is set a little under the printable area
+     (A4 landscape is 210mm tall; 10mm margins leave 190mm), which leaves slack for a browser that
+     adds its own header and footer. */
+  .certificate {
+    page: certificate; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 172mm;
+    max-width: none; margin: 0; box-shadow: none; break-inside: avoid; page-break-inside: avoid; break-after: avoid;
+  }
+  /* The middle takes the spare height, so the footer with the QR code sits at the bottom of the sheet. */
+  .cert-body { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; padding: 6mm 14mm; }
+  .certificate h1 { font-size: 50pt; }
+  .cert-name { font-size: 32pt; }
+  .cert-lead { margin-top: 5mm; }
+  .cert-top, .cert-foot { flex: none; }
+  .cert-foot { flex-wrap: nowrap; }
+
+  /* A ticket: a bordered sheet in the middle of a portrait page, one per person. */
+  .ticket-sheet {
+    box-sizing: border-box; width: 150mm; margin: 0 auto 10mm; border: 3px solid var(--ink); border-radius: 6mm; overflow: hidden;
+    background: var(--cream); break-inside: avoid; page-break-inside: avoid;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .ticket-sheet + .ticket-sheet { break-before: page; page-break-before: always; }
+  .ticket-sheet-top {
+    display: flex; align-items: center; gap: 4mm; padding: 4mm 6mm; background: var(--butter); border-bottom: 3px solid var(--ink);
+    font: 400 16pt/1 var(--font-display); text-transform: uppercase;
+  }
+  .ticket-sheet-top .cert-mark { background: var(--paper); }
+  .ticket-sheet-tag { margin-left: auto; padding: 2mm 4mm; border: 2px solid var(--ink); border-radius: 999px; background: var(--paper); font: 700 8pt/1 var(--font-sans); letter-spacing: 0.1em; }
+  .ticket-sheet-body { padding: 8mm 8mm 7mm; text-align: center; }
+  .ticket-sheet h2 { margin: 0 0 6mm; font: 400 30pt/0.95 var(--font-display); text-transform: uppercase; }
+  .ticket-sheet dl { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm 6mm; margin: 0 0 7mm; text-align: left; }
+  .ticket-sheet dt { font: 600 7.5pt/1.2 var(--font-sans); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .ticket-sheet dd { margin: 1mm 0 0; font-size: 11.5pt; font-weight: 600; }
+  .ticket-sheet-qr { width: 74mm; height: 74mm; margin: 0 auto 6mm; padding: 4mm; box-sizing: border-box; background: #fff; border: 2px solid var(--ink); border-radius: 4mm; line-height: 0; }
+  .ticket-sheet-qr svg { display: block; width: 100%; height: 100%; }
+  .ticket-sheet p { margin: 0; font-size: 9.5pt; color: var(--muted); }
+}
+
+/* --- The notification bell ----------------------------------------------------------- */
+.bell-wrap { position: relative; flex: none; margin-left: auto; }
+.who + .bell-wrap { margin-left: 0; }
+.bell-wrap + .menu-wrap { margin-left: 0; }
+@media (max-width: 559px) { .who + .bell-wrap { margin-left: auto; } }
+.bell {
+  position: relative; display: grid; place-items: center; width: 44px; height: 44px; min-height: 0; padding: 0;
+  border: var(--rule); border-radius: 50%; background: var(--paper); color: var(--ink); cursor: pointer;
+  transition: transform 0.3s var(--ease-spring);
+}
+.bell:hover { transform: scale(1.06); filter: none; box-shadow: none; }
+.bell:active { transform: scale(0.94); }
+.bell[aria-expanded="true"] { background: var(--butter); }
+.bell-count {
+  position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px;
+  display: grid; place-items: center; border: var(--rule); border-radius: 999px;
+  background: var(--coral); color: #fff; font: 700 11px/1 var(--font-sans);
+}
+.bell-panel {
+  position: absolute; top: calc(100% + 12px); right: 0; z-index: 50;
+  width: min(24rem, calc(100vw - 2rem)); max-height: calc(100svh - 110px); overflow: auto;
+  padding: 12px; border: var(--rule); border-radius: var(--radius-lg);
+  background: var(--paper); box-shadow: var(--shadow-pop);
+  transform-origin: top right; animation: bell-in 0.25s var(--ease-out) both;
+}
+@keyframes bell-in { from { opacity: 0; transform: translateY(-6px) scale(0.98); } }
+.bell-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 4px 10px; }
+.bell-head strong { font: 600 11px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; }
+.bell-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.bell-item {
+  display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: #fff; color: var(--ink); text-decoration: none; text-align: left;
+}
+.bell-item:hover { border-color: var(--ink); }
+.bell-item.unread { border-color: var(--ink); border-left: 6px solid var(--cobalt); background: var(--blue-bg); }
+.bell-item strong { font-size: 14px; }
+.bell-item span { font-size: 13px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.bell-item small { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
+.bell-empty { margin: 6px 4px 10px; color: var(--muted); font-size: 14px; }
+.bell-all { display: block; margin-top: 10px; padding: 8px; text-align: center; font-size: 13px; font-weight: 600; }
+.notification.unread { border-left: 8px solid var(--cobalt); }
+@media print { .bell-wrap { display: none !important; } }
+
+/* --- The events calendar ------------------------------------------------------------- */
+.calendar { display: grid; gap: 20px; align-items: start; }
+@media (min-width: 1000px) { .calendar { grid-template-columns: minmax(0, 1fr) 22rem; } }
+.cal-main { min-width: 0; border: var(--rule); border-radius: var(--radius); background: var(--paper); overflow: hidden; }
+.cal-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: var(--rule); }
+.cal-month { margin: 0; font: 400 clamp(1.5rem, 4vw, 2.2rem)/1 var(--font-display); text-transform: uppercase; }
+.cal-nav { display: flex; align-items: center; gap: 6px; }
+.cal-arrow {
+  display: grid; place-items: center; width: 36px; height: 36px; min-height: 0; padding: 0; border: var(--rule); border-radius: 50%;
+  background: var(--paper); color: var(--ink); font-size: 20px; line-height: 1; cursor: pointer;
+}
+.cal-arrow:hover { background: var(--butter); filter: none; box-shadow: none; }
+.cal-weekdays, .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.cal-weekdays span { padding: 8px 6px; font: 600 11px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); text-align: center; border-bottom: 1px solid var(--line); }
+.cal-blank, .cal-cell { min-height: 96px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.cal-grid > :nth-child(7n) { border-right: 0; }
+.cal-cell {
+  display: flex; flex-direction: column; justify-content: flex-start; gap: 4px; align-items: stretch; padding: 6px; margin: 0; min-width: 0;
+  background: transparent; color: var(--ink); border-radius: 0; text-align: left; cursor: pointer;
+  font: inherit; text-transform: none; letter-spacing: 0; box-shadow: none; border-top: 0; border-left: 0;
+}
+.cal-cell:hover { background: var(--cream); filter: none; box-shadow: none; transform: none; }
+.cal-cell.selected { background: var(--blue-bg); box-shadow: inset 0 0 0 2px var(--ink); }
+.cal-num { align-self: flex-start; display: grid; place-items: center; min-width: 26px; height: 26px; padding: 0 4px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.cal-cell.today .cal-num { background: var(--ink); color: var(--paper); }
+.cal-chips { display: grid; gap: 3px; min-width: 0; }
+.cal-chip, .cal-more { display: block; padding: 2px 6px; border-radius: 6px; font-size: 11px; line-height: 1.35; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-chip { border: 1px solid var(--ink); }
+.cal-more { color: var(--muted); padding-left: 2px; }
+.cal-chip.free, .cal-key.free, .cal-dots i.free, .cal-event.free { background: var(--mint); }
+.cal-chip.paid, .cal-key.paid, .cal-dots i.paid, .cal-event.paid { background: var(--butter); }
+.cal-chip.plain, .cal-key.plain, .cal-dots i.plain, .cal-event.plain { background: #fff; }
+.cal-chip.past, .cal-key.past, .cal-dots i.past, .cal-event.past { background: var(--gray-bg); color: var(--muted); }
+.cal-dots { display: none; gap: 3px; justify-content: center; flex-wrap: wrap; }
+.cal-dots i { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--ink); }
+.cal-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; padding: 10px 16px; font-size: 12px; color: var(--muted); }
+.cal-key { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--ink); border-radius: 3px; margin-left: 8px; }
+.cal-legend .cal-key:first-child { margin-left: 0; }
+.cal-day { border: var(--rule); border-radius: var(--radius); background: var(--paper); padding: 16px; }
+.cal-day-title { margin: 0; font: 400 1.5rem/1.05 var(--font-display); text-transform: uppercase; }
+.cal-day-count { margin: 4px 0 12px; }
+.cal-day-list { display: grid; gap: 10px; }
+.cal-event { border: var(--rule); border-radius: var(--radius-sm); padding: 12px; }
+.cal-event h4 { margin: 0 0 4px; font-size: 16px; }
+.cal-event p { margin: 0; font-size: 13px; }
+.cal-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+.cal-note { font-size: 12px; font-weight: 600; }
+@media (max-width: 720px) {
+  .cal-blank, .cal-cell { min-height: 54px; }
+  .cal-cell { align-items: center; padding: 4px 2px; }
+  .cal-num { align-self: center; }
+  .cal-chips { display: none; }
+  .cal-dots { display: flex; }
+}
+
+/* --- Profile ------------------------------------------------------------------------- */
+.profile-note { margin: 0; max-width: 60rem; }
+/* The UPI field with its buttons on the same line, lined up with the bottom of the input. */
+.upi-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 4px 0 14px; }
+.upi-row label { flex: 1 1 280px; min-width: 0; max-width: 32rem; }
+.upi-row button { height: 44px; }
+
+/* --- The door: confirming a check-in from the guest list ----------------------------- */
+.guest-confirm td { padding: 0; border-top: 0; }
+.confirm-box {
+  display: grid; gap: 8px; margin: 0 0 12px; padding: 14px 16px; border: 2px solid var(--ink); border-radius: var(--radius-sm);
+  background: var(--butter); box-shadow: 4px 4px 0 var(--ink);
+}
+.confirm-box h3 { margin: 0; font-size: 16px; }
+.confirm-box p { margin: 0; font-size: 14px; }
+.confirm-box .confirm-who { font-weight: 600; }
+.confirm-box .confirm-warn { padding: 8px 10px; border: var(--rule); border-radius: 8px; background: var(--coral); color: var(--ink); font-weight: 600; }
+.confirm-box .actions { margin-top: 4px; }
+
+/* --- Cash flow ----------------------------------------------------------------------- */
+.stat .hint { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.budget-bar { height: 14px; border: var(--rule); border-radius: 999px; background: var(--paper); overflow: hidden; margin: 8px 0; }
+.budget-bar span { display: block; height: 100%; background: var(--mint); border-right: var(--rule); }
+.budget-bar span.over { background: var(--coral); }
+
+/* --- Merchandise pictures ------------------------------------------------------------ */
+.product img { object-fit: cover; }
+.merch-thumb { width: 44px; height: 44px; margin-right: 10px; vertical-align: middle; object-fit: cover; border: var(--rule); border-radius: 10px; }
+
+/* --- Paying: the amount on the left, the way to pay on the right ---------------------- */
+.pay-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px 24px; flex-wrap: wrap; }
+.pay-amount { display: grid; gap: 2px; }
+.pay-amount span { font: 600 11px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.pay-amount strong { font: 400 2.2rem/1 var(--font-display); }
+.pay-bar .actions { margin: 0; justify-content: flex-end; }
+.notice + .pay-bar { margin-top: 14px; }
+.product .price { margin: 4px 0 10px; }

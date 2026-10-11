@@ -179,8 +179,9 @@ document.addEventListener("submit", async (event) => {
 
 // <button data-post="/api/v1/..." data-prompt="Reason" data-field="reason" data-required>
 // <button data-put="/api/v1/..." data-body='{"is_active": false}'>
+// <button data-delete="/api/v1/..." data-confirm="...">
 document.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-post], [data-put]");
+  const button = event.target.closest("[data-post], [data-put], [data-delete]");
   if (!button) return;
   event.preventDefault();
   const body = button.dataset.body ? JSON.parse(button.dataset.body) : {};
@@ -202,9 +203,11 @@ document.addEventListener("click", async (event) => {
   }
   button.disabled = true;
   try {
-    const result = button.dataset.put
-      ? await api("PUT", button.dataset.put, body)
-      : await api("POST", button.dataset.post, body);
+    const result = button.dataset.delete
+      ? await api("DELETE", button.dataset.delete)
+      : button.dataset.put
+        ? await api("PUT", button.dataset.put, body)
+        : await api("POST", button.dataset.post, body);
     finish(button, result);
   } catch (error) {
     showMessage(error.message);
@@ -281,4 +284,79 @@ document.querySelectorAll("[data-replay]").forEach((button) => {
     body.replaceWith(fresh);
     fresh.querySelectorAll("[data-magnetic]").forEach((pill) => pill.style.removeProperty("--mx"));
   });
+});
+
+// --- The notification bell -----------------------------------------------------------
+// The count is fetched when the page loads; the list is drawn when the panel opens. Everything
+// is written with textContent, so a title or message can never inject markup.
+document.querySelectorAll("[data-bell]").forEach((wrap) => {
+  const button = wrap.querySelector(".bell");
+  const panel = wrap.querySelector(".bell-panel");
+  const count = wrap.querySelector(".bell-count");
+  const list = wrap.querySelector(".bell-list");
+  const empty = wrap.querySelector(".bell-empty");
+  const readAll = wrap.querySelector("[data-bell-read-all]");
+  let feed = { unread: 0, items: [] };
+
+  function when(iso) {
+    const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes} min ago`;
+    if (minutes < 1440) return `${Math.round(minutes / 60)} h ago`;
+    const days = Math.round(minutes / 1440);
+    return days < 30 ? `${days} day${days === 1 ? "" : "s"} ago` : new Date(iso).toLocaleDateString();
+  }
+
+  function draw() {
+    count.hidden = feed.unread === 0;
+    count.textContent = feed.unread > 9 ? "9+" : String(feed.unread);
+    button.setAttribute("aria-label", feed.unread ? `Notifications, ${feed.unread} unread` : "Notifications");
+    readAll.hidden = feed.unread === 0;
+    list.replaceChildren();
+    for (const item of feed.items.slice(0, 8)) {
+      const row = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = item.href;
+      link.className = "bell-item" + (item.read ? "" : " unread");
+      const title = document.createElement("strong"); title.textContent = item.title;
+      const text = document.createElement("span"); text.textContent = item.message;
+      const meta = document.createElement("small");
+      meta.textContent = `${item.kind === "renewal" ? "Membership" : "Announcement"} · ${when(item.created_at)}`;
+      link.append(title, text, meta);
+      // Opening a notification marks it read on the way to where it leads.
+      link.addEventListener("click", async (event) => {
+        if (item.read) return;
+        event.preventDefault();
+        try { await api("POST", item.read_url); } catch (error) { /* still take them there */ }
+        window.location.href = item.href;
+      });
+      row.append(link);
+      list.append(row);
+    }
+    empty.hidden = feed.items.length > 0;
+  }
+
+  async function load() {
+    try { feed = await api("GET", "/api/v1/me/notifications/feed"); draw(); } catch (error) { /* the bell just stays quiet */ }
+  }
+
+  const set = (open) => {
+    panel.hidden = !open;
+    button.setAttribute("aria-expanded", String(open));
+    if (open) load();
+  };
+  button.addEventListener("click", () => set(panel.hidden));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !panel.hidden) { set(false); button.focus(); }
+  });
+  document.addEventListener("pointerdown", (event) => { if (!wrap.contains(event.target)) set(false); });
+  readAll.addEventListener("click", async () => {
+    readAll.disabled = true;
+    try {
+      for (const item of feed.items) if (!item.read) await api("POST", item.read_url);
+      await load();
+    } catch (error) { showMessage(error.message); }
+    readAll.disabled = false;
+  });
+  load();
 });

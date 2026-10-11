@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ event.name }} · WhoDoo{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/events.css">
+<link rel="stylesheet" href="{{ static('events.css') }}">
 <p><a href="/events">← All events</a></p>
 <div class="actions" style="justify-content: space-between; align-items: flex-start">
   <div>
@@ -172,6 +172,33 @@
 </section>
 {% endif %}
 
+{% if budget %}
+{# ---- Budget against TrustLedger (organizers and the treasurer) ---- #}
+<section class="card" aria-labelledby="budget-title">
+  <div class="actions" style="justify-content: space-between">
+    <h2 id="budget-title">Budget {% if budget.over_budget %}<span class="badge failed">Over budget</span>{% endif %}</h2>
+    {% if user.is_finance_admin %}<a class="button secondary small" href="/treasurer/events/{{ event.id }}">Full cash flow</a>{% endif %}
+  </div>
+  {% if budget.warning %}<div class="notice {{ 'error' if budget.over_budget else 'info' }}">{{ budget.warning }} Nothing is blocked; this is a warning.</div>{% endif %}
+  <div class="meta">
+    <span>Budget <strong>{{ budget.budget_paise | paise if budget.budget_paise is not none else "not set" }}</strong></span>
+    <span>Spent <strong>{{ budget.spent_paise | paise }}</strong></span>
+    <span>Approved, not paid <strong>{{ budget.committed_paise | paise }}</strong></span>
+    <span>Claims pending approval <strong>{{ budget.pending_paise | paise }}</strong></span>
+    {% if budget.remaining_paise is not none %}<span>Remaining <strong>{{ budget.remaining_paise | paise }}</strong></span>{% endif %}
+  </div>
+  {% if budget.available and event.status != "cancelled" %}
+  <form action="/api/v1/events/{{ event.id }}/budget" class="actions" id="budget-form">
+    <label>Set budget (₹) <input type="number" name="budget_rupees" min="0" step="0.01" required
+      value="{{ budget.budget_paise | paise_input if budget.budget_paise is not none else '' }}"></label>
+    <button type="submit" class="small secondary">Save budget</button>
+  </form>
+  {% elif not budget.available %}
+  <p class="muted">Event budgets are not switched on in this deployment. Spending is still tracked in the ledger.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if organizer and tickets %}
 {# ---- FairSeat ticket settings (organizers only) ---- #}
 <section class="card" aria-labelledby="tickets-title">
@@ -222,7 +249,8 @@
           </td>
           <td>
             {% if t.can_edit %}
-            <select data-assign="/api/v1/tasks/{{ t.id }}" aria-label="Allocate {{ t.title }} to">
+            <select data-assign="/api/v1/tasks/{{ t.id }}" data-event="{{ event.id }}" data-task="{{ t.id }}"
+                    data-title="{{ t.title }}" aria-label="Allocate {{ t.title }} to">
               <option value="">Unassigned</option>
               {# Whoever has it now stays shown, even if they are not in the list offered for new tasks. #}
               {% if t.assignee_id and t.assignee_id not in people | map(attribute="id") | list %}
@@ -234,7 +262,8 @@
             </select>
             {% else %}{{ t.assignee_name or "Unassigned" }}{% endif %}
           </td>
-          <td class="nowrap">{{ t.due_at | ist('%d %b, %H:%M') }}</td>
+          <td class="nowrap">{{ t.due_at | ist('%d %b, %H:%M') }}
+            {% if t.shift_starts_at %}<div class="muted" style="font-size: 12px">Shift {{ t.shift_starts_at | ist('%d %b %H:%M') }}–{{ t.shift_ends_at | ist('%H:%M') }}</div>{% endif %}</td>
           <td><span class="badge {{ t.status }}">{{ t.status | label }}</span>
             <div class="muted nowrap" style="font-size: 12px">{{ "Completed " ~ (t.completed_at | ist('%d %b, %H:%M')) if t.completed_at else "Updated " ~ (t.updated_at | ist('%d %b, %H:%M')) }}</div></td>
           {% if organizer %}
@@ -257,7 +286,7 @@
   {% if organizer and event.status in ("draft", "published") %}
   <details class="add-task" {% if not tasks %}open{% endif %}>
     <summary>Add a task</summary>
-    <form class="stack" data-api="POST" action="/api/v1/events/{{ event.id }}/tasks">
+    <form class="stack" data-task-form data-event="{{ event.id }}" action="/api/v1/events/{{ event.id }}/tasks">
       <div class="fields">
         <label>Task <input type="text" name="title" minlength="3" maxlength="120" required placeholder="e.g. Book the DJ"></label>
         <label>Allocate task to
@@ -267,16 +296,35 @@
           </select>
         </label>
         <label>Due (IST) <input type="datetime-local" name="due_at"></label>
+        {% if shifts_on %}
+        <label>Shift starts (IST) <input type="datetime-local" name="shift_starts_at"></label>
+        <label>Shift ends (IST) <input type="datetime-local" name="shift_ends_at"></label>
+        {% endif %}
         <label>Priority
           <select name="priority"><option value="medium">Medium</option><option value="high">High</option><option value="low">Low</option></select>
         </label>
       </div>
       <label>Details <textarea name="description" maxlength="1000" placeholder="Optional"></textarea></label>
       <label class="check"><input type="checkbox" name="is_critical"> Critical: the event cannot happen without this</label>
+      <p class="muted">Before a task is given to someone it is checked for duplicate tasks and clashing duties, and you review anything found.</p>
       <div class="actions"><button type="submit">Add task</button></div>
     </form>
   </details>
   {% endif %}
 </section>
 {% endblock %}
-{% block scripts %}<script src="/static/events.js"></script>{% endblock %}
+{% block scripts %}<script src="{{ static('events.js') }}"></script>
+<script>
+// Rupees in the box, whole paise to the API (no floating point).
+document.getElementById("budget-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target, value = form.budget_rupees.value.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(value)) { showMessage("Enter the budget in rupees, up to two decimals."); return; }
+  const [whole, part = ""] = value.split(".");
+  try {
+    await api("PUT", form.getAttribute("action"), { budget_paise: Number(whole) * 100 + Number((part + "00").slice(0, 2)) });
+    sessionStorage.setItem("flash", "Budget saved.");
+    window.location.reload();
+  } catch (error) { showMessage(error.message); }
+});
+</script>{% endblock %}

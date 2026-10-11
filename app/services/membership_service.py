@@ -1,7 +1,7 @@
 """MemberCore: membership plans, enrollment, dues and the member discount.
 
 A membership becomes active in exactly three ways, each leaving proof the database insists on
-(migrations/pending/031):
+(migrations/031):
 
     paid online      the payment provider confirms the checkout session for the dues
     paid in person   a treasurer or president records the money they received

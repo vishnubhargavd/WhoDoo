@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from pathlib import Path
 from urllib.parse import quote
@@ -13,15 +15,42 @@ from app.core.config import get_settings
 from app.core.dependencies import get_current_user
 from app.core.errors import AppError
 from app.db.database import SessionLocal
-from app.services import fairseat_pricing, membership_service, modules
-from app.web import dev_auth, event_pages, module_pages, pages, public_pages
+from app.services import fairseat_pricing, membership_service, modules, reminder_service
+from app.web import dev_auth, event_pages, member2_pages, module_pages, pages, public_pages
 from app.web.templating import APP_DIR, render
 
 logger = logging.getLogger("whodoo")
 settings = get_settings()
 settings.check()
 
+async def _renewal_reminder_job(every: int) -> None:
+    """Write due membership renewal reminders on a timer. Idempotent, so several processes
+    running it at once is harmless (the unique key keeps one row per stage)."""
+    while True:
+        try:
+            async with SessionLocal() as db:
+                written = await reminder_service.run_all(db)
+                await db.commit()
+            if written:
+                logger.info("Renewal reminders written: %s", written)
+        except Exception:
+            logger.exception("Renewal reminder job failed; it will run again")
+        await asyncio.sleep(every)
+
+
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    every = settings.renewal_reminder_interval_seconds
+    job = asyncio.create_task(_renewal_reminder_job(every)) if every else None
+    yield
+    if job:
+        job.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await job
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title="WhoDoo API",
     description="WhoDoo is a club management platform for college students. This service is its finance module: "
     "TrustLedger, Snap-to-Reimburse and MerchFlow.",
@@ -41,6 +70,7 @@ app.include_router(pages.router)
 app.include_router(event_pages.router)
 app.include_router(module_pages.router)
 app.include_router(public_pages.router)
+app.include_router(member2_pages.router)
 if settings.demo_auth:
     app.include_router(dev_auth.router)
 

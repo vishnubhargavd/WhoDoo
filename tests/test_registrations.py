@@ -17,6 +17,7 @@ from app.models.registration import EventRegistration
 from app.services import gatesync_service, payment_service, registration_service
 
 API = "/api/v1"
+QR = 'class="segno"'   # a QR code on a page, as distinct from the bell icon in the top bar
 NOW = datetime.now(timezone.utc)
 R = EventRegistration
 
@@ -157,7 +158,7 @@ async def test_free_registration_gives_a_ticket_and_one_place_per_student(client
     assert (await client.post(f"{API}/public/events/{uuid.uuid4()}/register", json=person(9))).status_code == 404
 
     ticket = await client.get("/ticket/" + token_of(mine))
-    assert ticket.status_code == 200 and ticket.text.count("<svg") == 1 and mine["participant_code"] in ticket.text
+    assert ticket.status_code == 200 and ticket.text.count(QR) == 2 and "ticket-sheet print-only" in ticket.text and mine["participant_code"] in ticket.text
     assert (await client.get("/ticket/" + "A" * 43)).status_code == 404
 
 
@@ -215,7 +216,7 @@ async def test_a_code_admits_once_whoever_shows_it(client, world, auth, db):
     assert second["status"] == "already_checked_in" and second["checkedInAt"] == first["checkedInAt"]
     assert await db.scalar(select(func.count()).select_from(R).where(R.status == "checked_in")) == 1
     used = await client.get("/ticket/" + token_of(mine))
-    assert "Checked in" in used.text and "<svg" not in used.text                 # the used ticket shows no code
+    assert "Checked in" in used.text and QR not in used.text                 # the used ticket shows no code
 
 
 async def test_many_scanners_reading_one_code_admit_it_once(client, world, auth, db):
@@ -250,7 +251,12 @@ async def test_door_list_manual_check_in_and_removed_participants(client, world,
     assert (await scan(client, auth, world.volunteer, event_id, await credential_for(db, kept)))["status"] == "already_checked_in"
     client.cookies.set(get_settings().session_cookie, create_access_token(world.volunteer.id))
     page = await client.get(f"/check-in/{event_id}")
-    assert page.status_code == 200 and "Student 1" in page.text and "1</strong> of 2" in page.text
+    assert page.status_code == 200 and "Student 1" in page.text and '1</strong> of <span id="door-total">2</span>' in page.text
+    assert "/static/door.js" in page.text and 'id="guest-search"' in page.text and "data-admit-registration" in page.text
+    # Each row carries what the in-page confirmation box shows: the name, and the IDs to check it against.
+    assert 'data-name="Student 2"' in page.text and "22CS0002" in page.text.split('data-name="Student 2"')[1][:200]
+    script = (await client.get("/static/door.js")).text
+    assert "confirm-box" in script and "Yes, check in" in script and "window.confirm" not in script
     assert "Hack Night" in (await client.get("/check-in")).text
     # After the event is cancelled nothing admits.
     client.cookies.clear()
@@ -276,7 +282,7 @@ async def test_paid_event_holds_the_place_then_confirms_with_one_ledger_entry(cl
     assert (held["status"], held["amount_paise"]) == ("pending_payment", 15000)
     assert (await client.get(f"{API}/public/events/{event_id}")).json()["places_left"] == 1     # the hold counts
     waiting = await client.get("/ticket/" + token_of(held))
-    assert "Pay ₹150.00" in waiting.text and "<svg" not in waiting.text                         # no code before payment
+    assert "Pay ₹150.00" in waiting.text and QR not in waiting.text                         # no code before payment
     unpaid = await credential_for(db, held)
     assert (await scan(client, auth, world.volunteer, event_id, unpaid))["status"] == "revoked"
 
@@ -440,7 +446,12 @@ async def test_a_participant_is_not_given_tasks_and_crew_cannot_register(client,
     # If the organiser removes her as a participant she can be given tasks again.
     registration_id = await db.scalar(select(R.id).where(R.user_id == world.member.id))
     await client.post(f"{API}/events/registrations/{registration_id}/cancel", headers=auth(world.lead))
-    assert (await client.post(tasks, json={"title": "Sell tickets", "assignee_id": str(world.member.id)}, headers=auth(world.lead))).status_code == 201
+    # (She now holds a task at the other event at the same time, which the clash review flags:
+    # a different rule, and one the organiser may override with a reason.)
+    again = {"title": "Sell tickets", "assignee_id": str(world.member.id)}
+    flagged = await client.post(tasks, json=again, headers=auth(world.lead))
+    assert (flagged.status_code, code(flagged)) == (409, "assignment_conflicts")
+    assert (await client.post(tasks, json={**again, "override_reason": "Covering both evenings"}, headers=auth(world.lead))).status_code == 201
 
 
 async def test_tasks_are_allocated_to_members_and_volunteers_who_are_not_attending(client, world, auth, db):
@@ -485,3 +496,53 @@ async def test_the_page_never_claims_an_email_that_was_not_sent(client, world, a
     ok = await client.post(f"{API}/public/registrations/{token}/resend")
     assert ok.status_code == 200 and ok.json()["status"] == "sent" and sent_messages == ["student1@college.example"]
     assert "A copy was emailed to student1@college.example" in (await client.get(f"/ticket/{token}")).text
+
+
+# --- The calendar on the front page -------------------------------------------------------
+
+
+async def test_the_calendar_shows_every_public_event_including_several_on_one_day(client, world, auth, db):
+    import json
+    import re
+
+    first = await make_event(client, auth, world, name="Hack Night")
+    second = await make_event(client, auth, world, mode="paid", price=15000, name="Movie Night")    # same day
+    await make_event(client, auth, world, publish=False, name="Secret Draft")
+    gone = await make_event(client, auth, world, name="Called Off")
+    await client.post(f"{API}/events/{gone}/status", json={"status": "cancelled"}, headers=auth(world.lead))
+    # One that has already happened and was completed: still on the calendar, as over.
+    await db.execute(text(
+        "INSERT INTO events (id, club_id, name, starts_at, ends_at, status, registration_mode, max_participants, price_paise, "
+        "lead_id, venue) SELECT gen_random_uuid(), club_id, 'Last Week', now() - interval '7 days', "
+        "now() - interval '7 days' + interval '2 hours', 'completed', 'free', 10, 0, lead_id, venue FROM events WHERE id = :id"), {"id": first})
+    await db.commit()
+    await register(client, first, 1)
+
+    page = (await client.get("/")).text                                         # no sign-in
+    data = json.loads(re.search(r'<script type="application/json" class="cal-data">(.*?)</script>', page, re.S).group(1))
+    by_name = {e["name"]: e for e in data}
+    assert set(by_name) == {"Hack Night", "Movie Night", "Last Week"}           # no draft, no cancelled
+    assert by_name["Hack Night"]["starts_at"][:10] == by_name["Movie Night"]["starts_at"][:10]
+    assert (by_name["Hack Night"]["registration_state"], by_name["Hack Night"]["places_left"]) == ("open", 2)
+    assert (by_name["Movie Night"]["registration_mode"], by_name["Movie Night"]["price_paise"]) == ("paid", 15000)
+    assert by_name["Last Week"]["registration_state"] == "closed"
+    assert by_name["Movie Night"]["id"] == second and by_name["Hack Night"]["club_name"] == "Test Club"
+    # Nothing private rides along in the page.
+    assert "student1@college.example" not in page and "22CS0001" not in page
+    # The same calendar heads the public events list.
+    assert 'class="cal-data"' in (await client.get("/events")).text
+
+
+async def test_modules_recorded_as_pending_are_not_applied_twice(db):
+    from app.core.config import get_settings as settings
+    from app.db.database import asyncpg_dsn
+    from app.db.migrate import run_migrations
+
+    # A database that took the optional modules while they lived in migrations/pending/.
+    await db.execute(text("UPDATE schema_migrations SET name = 'pending/' || name WHERE name LIKE '03%' OR name LIKE '02%'"))
+    await db.commit()
+    try:
+        assert await run_migrations(asyncpg_dsn(settings().database_url)) == []
+    finally:
+        await db.execute(text("UPDATE schema_migrations SET name = replace(name, 'pending/', '')"))
+        await db.commit()

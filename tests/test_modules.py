@@ -17,6 +17,7 @@ from app.models.shared import User
 from app.services import fairseat_pricing, gatesync_service, membership_service, modules, payment_service
 
 API = "/api/v1"
+QR = 'class="segno"'   # a QR code on a page (a ticket shows it twice: on screen, and on the sheet that prints)
 NOW = datetime.now(timezone.utc)
 
 
@@ -346,15 +347,15 @@ async def test_ticket_pages_show_the_code_only_to_its_holder(client, world, auth
     booking = await book(client, auth, world.member, event_id, category_id)
     client.cookies.set(get_settings().session_cookie, create_access_token(world.member.id))
     mine = await client.get("/tickets/mine")
-    assert mine.status_code == 200 and mine.text.count("<svg") == 1 and "Bake Sale" in mine.text
+    assert mine.status_code == 200 and mine.text.count(QR) == 2 and "Bake Sale" in mine.text
     assert gatesync_service.credential_for(uuid.UUID(booking["tickets"][0]["id"])) not in mine.text   # in the QR only
     assert "Bake Sale" in (await client.get("/tickets")).text
     assert (await client.get("/check-in")).status_code == 403
     client.cookies.set(get_settings().session_cookie, create_access_token(world.outsider.id))
-    assert "<svg" not in (await client.get("/tickets/mine")).text
+    assert QR not in (await client.get("/tickets/mine")).text
     client.cookies.set(get_settings().session_cookie, create_access_token(world.volunteer.id))
     door = await client.get(f"/check-in/{event_id}")
-    assert door.status_code == 200 and "Mia Member" in door.text and "0</strong> of 1" in door.text
+    assert door.status_code == 200 and "Mia Member" in door.text and '0</strong> of <span id="door-total">1</span>' in door.text
     assert "Bake Sale" in (await client.get("/check-in")).text
 
 
@@ -448,7 +449,7 @@ async def test_volunteering_and_single_certificates(client, world, auth, db):
     assert made.status_code == 201 and made.json()["issued_by_name"] == "Priya President"
     client.cookies.set(get_settings().session_cookie, create_access_token(world.member.id))
     printed = await client.get(f"/certificates/{made.json()['id']}")
-    assert printed.status_code == 200 and "Best Newcomer" in printed.text and "<svg" in printed.text
+    assert printed.status_code == 200 and "Best Newcomer" in printed.text and QR in printed.text
     client.cookies.set(get_settings().session_cookie, create_access_token(world.outsider.id))
     assert (await client.get(f"/certificates/{made.json()['id']}")).status_code == 404
 

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Tickets · {{ event.name }} · WhoDoo{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="/static/events.css">
+<link rel="stylesheet" href="{{ static('events.css') }}">
 <p><a href="/events/{{ event.id }}">← {{ event.name }}</a></p>
 <h1>Ticket settings <span class="badge {{ tickets.sale_state }}">{{ tickets.sale_state | label }}</span></h1>
 <p class="sub">FairSeat · {{ event.name }} · starts {{ event.starts_at | ist }}{% if event.starts_at %} IST{% endif %}.
@@ -111,4 +111,4 @@
 <p class="empty">A {{ event.status }} event's ticket settings can no longer be changed.</p>
 {% endif %}
 {% endblock %}
-{% block scripts %}<script src="/static/events.js"></script><script src="/static/tickets.js"></script>{% endblock %}
+{% block scripts %}<script src="{{ static('events.js') }}"></script><script src="{{ static('tickets.js') }}"></script>{% endblock %}

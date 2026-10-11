@@ -1,6 +1,7 @@
 """The shared frontend: landing page, sign-in, home hub, navigation and the design system."""
 
 import re
+import time
 from decimal import Decimal
 from pathlib import Path
 
@@ -20,16 +21,16 @@ async def test_landing_page_for_signed_out_visitors(client):
     page = await client.get("/")
     assert page.status_code == 200
     html = page.text
-    assert "Who does what? WhoDoo knows." in html and "Twelve tools." in html
+    assert "Who does what? WhoDoo knows." in html and "What's on." in html and "Twelve tools." not in html
     assert html.count('class="slice"') == 9                      # the sliced title animation
     assert 'href="/login"' in html and "Enter WhoDoo" in html
-    # Tools that exist in this app link to them (through sign-in); the rest say so honestly.
-    assert 'href="/login?next=/store"' in html and 'href="/login?next=/my-tasks"' in html
+    # The front page is the events calendar: a month grid drawn from the events embedded in the page.
     assert 'href="/events"' in html and "Browse events" in html   # events are public: no sign-in on the way
-    # The test database has every module's tables, so all twelve tools are live.
-    assert html.count("Live — open it") == 12 and "Coming soon" not in html
-    for href in ("/memberships", "/tickets", "/check-in", "/announcements", "/certificates", "/handover"):
-        assert f'href="/login?next={href}"' in html
+    assert "data-calendar" in html and 'class="cal-data"' in html and "/static/calendar.js" in html
+    assert 'href="#calendar"' in html and "See the calendar" in html
+    # A visitor's menu: the public places, and sign-in.
+    for href in ("/events", "/#calendar", "/verify", "/login"):
+        assert f'href="{href}"' in html
     old = await client.get("/welcome")
     assert old.status_code == 308 and old.headers["location"] == "/"
 
@@ -38,7 +39,7 @@ async def test_landing_is_the_front_page_even_when_signed_in(client, world):
     _sign_in(client, world.treasurer)
     front = await client.get("/")
     assert front.status_code == 200
-    assert "Twelve tools." in front.text and "Hey Tara." not in front.text
+    assert "What's on." in front.text and "Hey Tara." not in front.text
     assert 'href="/home"' in front.text and "Open my WhoDoo" in front.text   # the way in to their own pages
     assert 'href="/store"' in front.text                                        # live tools link straight through
 
@@ -104,21 +105,21 @@ async def test_home_shows_live_figures_for_the_person(client, db, world, auth):
     assert "open tasks for you" in home and "upcoming events" in home
 
 
-async def test_landing_page_says_so_when_a_module_has_no_tables(client, monkeypatch):
+async def test_the_menu_says_so_when_a_module_has_no_tables(client, world, monkeypatch):
     await client.get("/")
-    monkeypatch.setattr(modules, "_tables", frozenset({"announcements"}))
-    html = (await client.get("/")).text
-    assert html.count("Live — open it") == 7 and html.count("Coming soon") == 5
-    for name in ("MemberCore", "FairSeat", "GateSync", "CertiDoo"):
-        card = html[html.index(name) - 600: html.index(name) + 400]
-        assert "<article" in card and "Coming soon" in card
-    for soon in ("Memberships", "Tickets", "Check-in", "Certificates", "Handover"):
+    monkeypatch.setattr(modules, "_tables", frozenset({"announcements"}))     # a database not migrated yet
+    monkeypatch.setattr(modules, "_looked_at", time.monotonic())   # just looked: no re-check yet
+    _sign_in(client, world.member)
+    html = (await client.get("/home")).text
+    for soon in ("Memberships", "Tickets", "Certificates", "Handover"):
         assert f'aria-disabled="true">{soon}' in html
+    assert 'href="/announcements"' in html and 'href="/memberships"' not in html
     assert (await client.get("/api/v1/certificates/verify/ABCDEFGHIJKLMNOP")).status_code == 404
 
 
 def test_navigation_is_role_aware(monkeypatch):
     monkeypatch.setattr(modules, "_tables", frozenset())   # a database with none of the optional modules
+    monkeypatch.setattr(modules, "_looked_at", time.monotonic())   # just looked: no re-check yet
 
     class Person:
         def __init__(self, role): self.role = role
@@ -128,7 +129,7 @@ def test_navigation_is_role_aware(monkeypatch):
         return {section["title"]: [link["label"] for link in section["links"]] for section in nav["sections"]}
 
     assert links("member") == {
-        "Events": ["Events", "My tasks", "Public page"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"]}
+        "Events": ["Events", "My tasks", "Register for events"], "Me": ["Profile"], "Expenses": ["My expenses", "Submit expense"], "Store": ["Store", "My orders"]}
     assert links("event_lead")["Expenses"] == ["My expenses", "Submit expense", "Approvals"]
     assert "Finance" not in links("event_lead")
     assert links("treasurer")["Finance"] == ["Dashboard", "Ledger"]
@@ -149,6 +150,7 @@ def test_navigation_is_role_aware(monkeypatch):
         "Memberships", "Tickets", "Check-in", "Announcements", "Certificates", "Handover")
 
     monkeypatch.setattr(modules, "_tables", frozenset(modules.MODULES))   # every module migrated
+    monkeypatch.setattr(modules, "_looked_at", time.monotonic())   # just looked: no re-check yet
     assert links("member")["Tickets"] == ["Book tickets", "My tickets"]              # the door is for door staff
     assert links("volunteer")["Tickets"] == ["Book tickets", "My tickets", "Check-in"]
     assert links("member")["Club"] == ["Memberships", "Announcements", "Certificates", "Handover"]

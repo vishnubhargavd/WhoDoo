@@ -11,7 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db, get_optional_user
 from app.core.errors import AppError, forbidden
-from app.services import event_service, registration_service, task_service, ticket_service, venue_service
+from app.services import (
+    event_insights,
+    event_service,
+    modules,
+    registration_service,
+    task_service,
+    ticket_service,
+    venue_service,
+)
 from app.web.public_pages import public_events_page
 from app.services.syncsphere import IST
 from app.web.templating import inr, render, templates
@@ -65,7 +73,8 @@ async def new_event_page(request: Request, user: CurrentUser = Depends(get_curre
     if not event_service.can_create(user):
         raise forbidden("Only the president or an event lead can create events")
     leads = await event_service.list_leads(db, user.club_id)
-    return render(request, "events/form.html", user, event=None, leads=leads, venues=await venue_service.list_venues(db))
+    return render(request, "events/form.html", user, event=None, leads=leads, venues=await venue_service.list_venues(db),
+                  budget=None, budgets_on=modules.migrated("budgets"))
 
 
 @router.get("/events/{event_id}/edit")
@@ -74,7 +83,8 @@ async def edit_event_page(
 ):
     event = await event_service.get_managed_event(db, user, event_id)
     leads = await event_service.list_leads(db, user.club_id)
-    return render(request, "events/form.html", user, event=event, leads=leads, venues=await venue_service.list_venues(db))
+    return render(request, "events/form.html", user, event=event, leads=leads, venues=await venue_service.list_venues(db),
+                  budget=await event_insights.budget(db, user, event_id), budgets_on=modules.migrated("budgets"))
 
 
 @router.get("/events/{event_id}")
@@ -85,7 +95,8 @@ async def event_detail_page(
     [out] = await event_service.to_out(db, user, [event])
     tasks = await task_service.to_out(db, user, await task_service.list_for_event(db, event))
     organizer = event_service.can_manage(user, event)
-    context = dict(event=out, tasks=tasks, organizer=organizer, readiness=None, schedule=None, people=[])
+    context = dict(event=out, tasks=tasks, organizer=organizer, readiness=None, schedule=None, people=[],
+                   shifts_on=modules.migrated("crew_shifts"))
     if organizer:
         context.update(
             readiness=await event_service.readiness(db, user, event),
@@ -97,6 +108,8 @@ async def event_detail_page(
             # None while FairSeat is off: its tables may not exist, and the page shows no ticket card.
             tickets=await ticket_service.config_out(db, event, can_manage=True) if ticket_service.enabled() else None,
         )
+    if organizer or user.is_finance_admin:
+        context.update(budget=await event_insights.budget(db, user, event.id))
     return render(request, "events/detail.html", user, **context)
 
 
