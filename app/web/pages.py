@@ -25,6 +25,7 @@ from app.schemas.ledger import LedgerFilters
 from app.core.errors import AppError
 from app.services import (
     announcement_service,
+    cashflow_service,
     event_service,
     expense_service,
     gatesync_service,
@@ -33,56 +34,14 @@ from app.services import (
     merch_service,
     modules,
     payment_service,
+    reminder_service,
     shared_directory,
     task_service,
 )
+from app.web.public_pages import calendar_data
 from app.web.templating import inr, render
 
 router = APIRouter(include_in_schema=False)
-
-
-# The twelve WhoDoo tools from the product design. `href` here is for the tools that are
-# always on; the six in MODULE_FEATURES get theirs when their tables exist.
-FEATURES = (
-    ("membercore", "MemberCore", "Memberships", "Profiles, dues, roles, renewals and member discounts in one source of truth.", None),
-    ("fairseat", "FairSeat", "Tickets", "Live ticket availability with member pricing and fair, automatic waitlists.", None),
-    ("gatesync", "GateSync", "Attendance", "QR check-in at the door with built-in duplicate prevention.", None),
-    ("crewpulse", "CrewPulse", "Volunteers", "Coordinate tasks and recognise every volunteer contribution.", "/my-tasks"),
-    ("trustledger", "TrustLedger", "Finances", "Transparent budgets with clear, auditable approval flows.", "/treasurer"),
-    ("snap-to-reimburse", "Snap-to-Reimburse", "Reimbursements", "Snap a receipt. OCR drafts the claim and routes it for approval.", "/expenses/new"),
-    ("merchflow", "MerchFlow", "Merchandise", "Take merch orders and keep inventory honest across every drop.", "/store"),
-    ("crewdoo-connect", "CrewDoo Connect", "Announcements", "Announcements and reminders that reach exactly the right people.", None),
-    ("event-autopilot", "Event Autopilot", "Events", "Readiness monitoring that flags what an event still needs before doors open.", "/events"),
-    ("syncsphere", "SyncSphere", "Calendar", "A conflict-aware schedule for every club event.", "/events"),
-    ("certidoo", "CertiDoo", "Certificates", "Issue verifiable digital certificates for participation and service.", None),
-    ("legacyvault", "LegacyVault", "Handover", "Pass knowledge to next year's leaders without starting from zero.", None),
-)
-
-
-# Tools that appear once their module's tables exist (app/services/modules.py): tool -> (module, page).
-MODULE_FEATURES = {
-    "membercore": ("memberships", "/memberships"),
-    "fairseat": ("tickets", "/tickets"),
-    "gatesync": ("checkin", "/check-in"),
-    "crewdoo-connect": ("announcements", "/announcements"),
-    "certidoo": ("certificates", "/certificates"),
-    "legacyvault": ("handover", "/handover"),
-}
-
-
-def _features(user: CurrentUser | None) -> list[dict]:
-    features = [dict(zip(("id", "name", "category", "description", "href"), row)) for row in FEATURES]
-    for feature in features:
-        # TrustLedger's pages are for the treasurer and president; others get their own expenses.
-        if feature["id"] == "trustledger" and user is not None and not user.is_finance_admin:
-            feature["href"] = "/expenses"
-        module, href = MODULE_FEATURES.get(feature["id"], (None, None))
-        if module and modules.has(module):
-            # The door is for door staff; everyone else's side of GateSync is their own tickets.
-            if module == "checkin" and user is not None and user.role == "member":
-                href = "/tickets/mine"
-            feature["href"] = href
-    return features
 
 
 async def _home_tiles(db: AsyncSession, user: CurrentUser) -> list[dict]:
@@ -159,9 +118,11 @@ async def _home_tiles(db: AsyncSession, user: CurrentUser) -> list[dict]:
 
 
 @router.get("/")
-async def landing(request: Request, user: CurrentUser | None = Depends(get_optional_user)):
-    """The product page: the first thing anyone sees, signed in or not."""
-    return render(request, "landing.html", user, features=_features(user))
+async def landing(
+    request: Request, user: CurrentUser | None = Depends(get_optional_user), db: AsyncSession = Depends(get_db)
+):
+    """The first thing anyone sees, signed in or not: the campus events calendar."""
+    return render(request, "landing.html", user, calendar=await calendar_data(db))
 
 
 @router.get("/welcome")
@@ -174,7 +135,10 @@ async def welcome():
 async def home(request: Request, user: CurrentUser = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """A signed-in person's own page: live figures from every module they can use."""
     club = await shared_directory.get_club(db, user.club_id)
-    return render(request, "home.html", user, tiles=await _home_tiles(db, user), club_name=club.name if club else None)
+    reminders = await reminder_service.list_for(db, user, unread_only=True)
+    await db.commit()
+    return render(request, "home.html", user, tiles=await _home_tiles(db, user), club_name=club.name if club else None,
+                  reminders=reminders)
 
 
 @router.get("/whoami")
@@ -209,9 +173,20 @@ async def treasurer_dashboard(
         user,
         summary=summary,
         event_results=event_results,
+        overview=await cashflow_service.overview(db, user.club_id),
+        event_rows=await cashflow_service.event_rows(db, user, events),
         recent=recent,
         trend_peak=peak,
     )
+
+
+@router.get("/treasurer/events/{event_id}")
+async def event_cash_flow_page(
+    event_id: uuid.UUID, request: Request, user: CurrentUser = Depends(require_finance_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """One event's money in and out, against its budget. Treasurer and president."""
+    return render(request, "treasurer_event.html", user, flow=await cashflow_service.event_cash_flow(db, user, event_id))
 
 
 @router.get("/treasurer/ledger")

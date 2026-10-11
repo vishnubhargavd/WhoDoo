@@ -51,41 +51,22 @@
       <div class="hero-cta">
         <a class="pill" data-magnetic href="{{ '/home' if user else '/login' }}">{{ "Open my WhoDoo" if user else "Sign in" }}</a>
         <a class="pill" data-magnetic href="{{ '/explore' if user else '/events' }}">Browse events</a>
-        <a class="pill" data-magnetic href="#features">Explore features
+        <a class="pill" data-magnetic href="#calendar">See the calendar
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
         </a>
       </div>
     </div>
   </section>
 
-  <section class="section" id="features" aria-labelledby="features-title">
+  <section class="section" id="calendar" aria-labelledby="calendar-title">
     <div class="section-inner">
       <div class="section-head">
-        <h2 id="features-title" class="mega reveal">Twelve tools.<br>One campus.</h2>
-        <p class="lead reveal">Memberships, tickets, attendance, volunteers, money and more, all run from one place for every
-          student organization. The tools marked live are running in this build.</p>
+        <h2 id="calendar-title" class="mega reveal">What's on.</h2>
+        <p class="lead reveal">Every club's events in one calendar. Pick a day to see what is happening and register:
+          no account needed.</p>
       </div>
 
-      <ul class="tiles">
-        {% set accents = ("", "mint", "butter", "cobalt") %}
-        {% for feature in features %}
-        <li id="{{ feature.id }}" class="reveal" style="--i: {{ loop.index0 % 3 }}; scroll-margin-top: 24px">
-          {# Events are public: a visitor goes straight to the list and can register without signing in. #}
-          {% if feature.href %}<a class="card tile" href="{{ feature.href if user or feature.href == '/events' else '/login?next=' ~ feature.href }}">
-          {% else %}<article class="card tile">{% endif %}
-            <div class="tile-top">
-              <span class="tile-num"><span class="dot {{ accents[loop.index0 % 4] }}" aria-hidden="true"></span>{{ "%02d" | format(loop.index) }}</span>
-              <span class="tag">{{ feature.category }}</span>
-            </div>
-            <div class="tile-body">
-              <h3>{{ feature.name }}</h3>
-              <p>{{ feature.description }}</p>
-              <p><span class="tag {{ 'live' if feature.href else 'soon' }}">{{ "Live — open it" if feature.href else "Coming soon" }}</span></p>
-            </div>
-          {% if feature.href %}</a>{% else %}</article>{% endif %}
-        </li>
-        {% endfor %}
-      </ul>
+      {% include "_calendar.html" %}
 
       <div class="cta-band reveal">
         <p>Who does what?<br>WhoDoo knows.</p>
@@ -97,6 +78,7 @@
     </div>
   </section>
 </main>
-<script src="/static/app.js"></script>
+<script src="{{ static('app.js') }}"></script>
+<script src="{{ static('calendar.js') }}"></script>
 </body>
 </html>

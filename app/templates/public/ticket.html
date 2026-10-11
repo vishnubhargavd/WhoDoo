@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Your ticket · {{ event.name }} · WhoDoo{% endblock %}
 {% block content %}
+{# What prints is the ticket sheet alone; everything for the screen is left out of the printout. #}
+{% if qr_svg %}
+{% with sheet_event=event.name, sheet_when=(event.starts_at | ist) ~ " IST", sheet_venue=event.venue or "To be announced",
+        sheet_name=r.full_name, sheet_id=r.participant_code, sheet_qr=qr_svg %}{% include "_ticket_sheet.html" %}{% endwith %}
+{% endif %}
+<div class="{{ 'screen-only' if qr_svg }}">
 <h1>{{ event.name }}</h1>
 <p class="sub">{{ event.starts_at | ist }} IST · {{ event.venue or "Venue to be announced" }}</p>
 
@@ -26,7 +32,7 @@
   {% endif %}
   <div class="actions" style="justify-content: center">
     <button class="small secondary" data-post="/api/v1/public/registrations/{{ token }}/resend">Email it to me again</button>
-    <button class="small secondary" onclick="window.print()">Print</button>
+    <button class="small secondary" onclick="window.print()">Print or save as PDF</button>
   </div>
 
   {% elif r.status == "registered" %}
@@ -39,9 +45,12 @@
   <div class="notice info">Your place is held until <strong>{{ r.hold_expires_at | ist('%H:%M') }} IST</strong>.
     Pay <strong>{{ r.amount_paise | paise }}</strong> to confirm it.
     {% if mock_payments %}(Mock payment: no real money moves.){% else %}You pay on Stripe's secure page.{% endif %}</div>
-  <div class="actions">
-    <button data-pay-registration>Pay {{ r.amount_paise | paise }}</button>
-    {% if mock_payments %}<button class="secondary" data-decline-registration>Simulate a declined card</button>{% endif %}
+  <div class="pay-bar">
+    <div class="pay-amount"><span>To pay</span><strong>{{ r.amount_paise | paise }}</strong></div>
+    <div class="actions">
+      {% if mock_payments %}<button class="danger" data-decline-registration>Simulate a declined card</button>{% endif %}
+      <button class="success" data-pay-registration>Pay {{ r.amount_paise | paise }}{{ " (mock)" if mock_payments else " with Stripe" }}</button>
+    </div>
   </div>
 
   {% elif r.refund_status %}
@@ -57,5 +66,6 @@
   <p><a class="button" href="/e/{{ event.id }}">Register again</a></p>
   {% endif %}
 </div>
+</div>
 {% endblock %}
-{% block scripts %}<script src="/static/public.js"></script>{% endblock %}
+{% block scripts %}<script src="{{ static('public.js') }}"></script>{% endblock %}

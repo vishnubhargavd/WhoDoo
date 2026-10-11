@@ -158,6 +158,39 @@ async def public_events(db: AsyncSession, now: datetime | None = None, event_id:
     return out
 
 
+CALENDAR_BACK = timedelta(days=92)
+CALENDAR_AHEAD = timedelta(days=366)
+
+
+async def calendar_events(db: AsyncSession, now: datetime | None = None) -> list[PublicEventOut]:
+    """Everything the public calendar shows: published and completed events of every club, from
+    about three months back to a year ahead. Drafts and cancelled events never appear."""
+    now = now or utcnow()
+    rows = (await db.execute(
+        select(Event, Club.name, Venue.location)
+        .join(Club, Club.id == Event.club_id)
+        .outerjoin(Venue, Venue.id == Event.venue_id)
+        .where(Event.status.in_(("published", "completed")), Event.starts_at.isnot(None), Event.ends_at.isnot(None),
+               Event.starts_at >= now - CALENDAR_BACK, Event.starts_at <= now + CALENDAR_AHEAD)
+        .order_by(Event.starts_at, Event.name)
+    )).all()
+    taken = await _taken(db, [event.id for event, _, _ in rows], now)
+    out = []
+    for event, club_name, location in rows:
+        used = taken.get(event.id, 0)
+        takes = event.registration_mode != "none"
+        limit = event.max_participants if takes else None
+        over = event.status != "published" or event.ends_at <= now
+        out.append(PublicEventOut(
+            id=event.id, name=event.name, description=event.description, club_name=club_name,
+            starts_at=event.starts_at, ends_at=event.ends_at, venue=event.venue, venue_location=location,
+            registration_mode=event.registration_mode, price_paise=event.price_paise, max_participants=limit,
+            registered=used, places_left=max(limit - used, 0) if limit is not None else None,
+            registration_state=("closed" if takes else "none") if over else _state(event, used, now),
+        ))
+    return out
+
+
 async def public_event(db: AsyncSession, event_id: uuid.UUID, now: datetime | None = None) -> PublicEventOut:
     found = await public_events(db, now, event_id)
     if not found:

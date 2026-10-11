@@ -1,10 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Events · WhoDoo{% endblock %}
+{% block scripts %}<script src="{{ static('calendar.js') }}"></script>{% endblock %}
 {% block content %}
 <h1>Upcoming events</h1>
 <p class="sub">Open to every student. Pick an event and register: no account needed.
   {% if not user %}Running a club? <a href="/login?next=/events">Sign in</a> to manage your events.{% endif %}</p>
 
+<div class="card">{% include "_calendar.html" %}</div>
+
+<h2>Coming up</h2>
 {% for e in events %}
 <article class="card">
   <div class="actions" style="justify-content: space-between; align-items: flex-start">

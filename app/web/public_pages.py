@@ -15,9 +15,15 @@ from app.web.templating import render
 router = APIRouter(include_in_schema=False)
 
 
+async def calendar_data(db: AsyncSession) -> list[dict]:
+    """The public calendar's events, ready to embed in a page as JSON."""
+    return [event.model_dump(mode="json") for event in await registration_service.calendar_events(db)]
+
+
 async def public_events_page(request: Request, user: CurrentUser | None, db: AsyncSession):
     await registration_service.purge_if_due(db)
-    return render(request, "public/events.html", user, events=await registration_service.public_events(db))
+    return render(request, "public/events.html", user, events=await registration_service.public_events(db),
+                  calendar=await calendar_data(db))
 
 
 @router.get("/explore")

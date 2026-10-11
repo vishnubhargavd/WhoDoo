@@ -1,4 +1,4 @@
-{# The glass menu: every destination this user has, plus any module whose tables this database lacks. #}
+{# The three-bar menu: every destination this person has, grouped the way the work is. #}
 <div class="menu-wrap" data-menu>
   <button type="button" class="menu-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
     <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
@@ -6,26 +6,27 @@
   <nav id="site-menu" class="site-menu" aria-label="All sections" hidden>
     {% set counter = namespace(i=0) %}
     {% if user %}
-      {% for section in nav.sections %}
-      <h3>{{ section.title }}</h3>
+      {% for section in nav.sections if section.title != "Me" %}
+      {# A section's links may carry a heading of their own (the shop and running the shop). #}
+      {% for heading, links in section.links | groupby("group") | sort(attribute="0", reverse=(section.title == "Store")) %}
+      <h3>{{ heading }}</h3>
       <ul>
-        {% for link in section.links %}
+        {% for link in links %}
         <li style="--i: {{ counter.i }}"><a href="{{ link.href }}" class="{{ 'active' if link.active }}"
           {% if link.active %}aria-current="page"{% endif %}>{{ link.label }}</a></li>
         {% set counter.i = counter.i + 1 %}
         {% endfor %}
       </ul>
       {% endfor %}
+      {% endfor %}
     {% else %}
-      <h3>Explore</h3>
+      <h3>Events</h3>
       <ul>
         <li class="wide" style="--i: 0"><a href="/events">Upcoming events · register</a></li>
-        {% for label, href in (("Event tools", "#event-autopilot"), ("Volunteers", "#crewpulse"), ("Finances", "#trustledger"),
-                               ("Reimbursements", "#snap-to-reimburse"), ("Merchandise", "#merchflow"), ("Calendar", "#syncsphere")) %}
-        <li style="--i: {{ loop.index0 }}"><a href="/{{ href }}">{{ label }}</a></li>
-        {% endfor %}
+        <li style="--i: 1"><a href="/#calendar">Calendar</a></li>
+        <li style="--i: 2"><a href="/verify">Check a certificate</a></li>
       </ul>
-      {% set counter.i = 6 %}
+      {% set counter.i = 3 %}
     {% endif %}
     {% if nav.coming_soon %}
     <h3>Not switched on here yet</h3>
@@ -38,11 +39,13 @@
     <h3>Account</h3>
     <ul>
       {% if user %}
-        <li style="--i: {{ counter.i + 5 }}"><a href="/">About WhoDoo</a></li>
-        {% if demo_auth %}<li style="--i: {{ counter.i + 6 }}"><a href="/logout">Switch user</a></li>{% endif %}
-        <li class="wide" style="--i: {{ counter.i + 7 }}"><a href="/home">My home</a></li>
+        <li style="--i: {{ counter.i + 5 }}"><a href="/profile">Profile</a></li>
+        <li style="--i: {{ counter.i + 6 }}"><a href="/notifications">Notifications</a></li>
+        <li style="--i: {{ counter.i + 7 }}"><a href="/">Calendar</a></li>
+        {% if demo_auth %}<li style="--i: {{ counter.i + 8 }}"><a href="/logout">Switch user</a></li>{% endif %}
+        <li class="wide" style="--i: {{ counter.i + 9 }}"><a href="/home">My home</a></li>
       {% else %}
-        <li class="wide" style="--i: {{ counter.i + 5 }}"><a href="/login">Enter WhoDoo</a></li>
+        <li class="wide" style="--i: {{ counter.i + 5 }}"><a href="/login">Sign in</a></li>
       {% endif %}
     </ul>
   </nav>

@@ -46,6 +46,39 @@ def label(value) -> str:
     return str(value).replace("_", " ").capitalize() if value else "—"
 
 
+def static(path: str) -> str:
+    """The address of a file in app/static, tagged with when it last changed. A browser keeps
+    stylesheets and scripts until their address changes, so without the tag an edit to styles.css
+    is not seen until someone forces a reload."""
+    try:
+        version = int((APP_DIR / "static" / path).stat().st_mtime)
+    except OSError:
+        version = 0
+    return f"/static/{path}?v={version}"
+
+
+# A picture for every product: the one its admin gave it, or else an illustration chosen from its
+# name, so nothing in the store is ever shown as a blank box.
+MERCH_ART = (
+    (("hoodie", "sweatshirt", "jacket"), "hoodie"),
+    (("t-shirt", "tshirt", "tee", "shirt", "jersey"), "tshirt"),
+    (("mug", "cup", "bottle", "flask"), "mug"),
+    (("cap", "hat", "beanie"), "cap"),
+    (("bag", "tote", "backpack"), "bag"),
+    (("sticker", "badge", "pin", "patch"), "sticker"),
+)
+
+
+def product_image(product) -> str:
+    if getattr(product, "image_url", None):
+        return product.image_url
+    name = (getattr(product, "name", "") or "").lower()
+    art = next((picture for words, picture in MERCH_ART if any(word in name for word in words)), "item")
+    return static(f"merch/{art}.svg")
+
+
+templates.env.globals["static"] = static
+templates.env.globals["product_image"] = product_image
 templates.env.filters["inr"] = inr
 templates.env.filters["nice_date"] = nice_date
 templates.env.filters["label"] = label
@@ -58,16 +91,19 @@ templates.env.filters["label"] = label
 
 FINANCE_ROLES = ("treasurer", "president")
 APPROVER_ROLES = ("event_lead", "treasurer", "president")
+ORGANISER_ROLES = ("event_lead", "president")
 
 DOOR_STAFF = ("volunteer", "event_lead", "treasurer", "president")
 
-# (label, path, roles, module). A link with a module is offered only where that module's
-# tables exist (app/services/modules.py); until then its label is listed as not here yet.
+# (label, path, roles, module[, menu heading]). A link with a module is offered only where that
+# module's tables exist (app/services/modules.py); until then its label is listed as not here yet.
+# The optional fifth item files the link under a heading of its own in the three-bar menu.
 SECTIONS = (
     ("Events", (
         ("Events", "/events", None, None),
         ("My tasks", "/my-tasks", None, None),
-        ("Public page", "/explore", None, None),
+        ("Register for events", "/explore", None, None),
+        ("Crew clashes", "/crew/review", ORGANISER_ROLES, None),
     )),
     ("Tickets", (
         ("Book tickets", "/tickets", None, "tickets"),
@@ -80,6 +116,9 @@ SECTIONS = (
         ("Certificates", "/certificates", None, "certificates"),
         ("Handover", "/handover", None, "handover"),
     )),
+    ("Me", (
+        ("Profile", "/profile", None, None),
+    )),
     ("Expenses", (
         ("My expenses", "/expenses", None, None),
         ("Submit expense", "/expenses/new", None, None),
@@ -88,8 +127,9 @@ SECTIONS = (
     ("Store", (
         ("Store", "/store", None, None),
         ("My orders", "/orders", None, None),
-        ("Merch admin", "/admin/merch", FINANCE_ROLES, None),
-        ("Merch orders", "/admin/merch/orders", FINANCE_ROLES, None),
+        # Shown under their own "Merchandise" heading in the menu: running the shop is not shopping.
+        ("Merch admin", "/admin/merch", FINANCE_ROLES, None, "Merchandise"),
+        ("Merch orders", "/admin/merch/orders", FINANCE_ROLES, None, "Merchandise"),
     )),
     ("Finance", (
         ("Dashboard", "/treasurer", FINANCE_ROLES, None),
@@ -103,7 +143,8 @@ ALIASES = {"/checkout": "/orders"}
 def coming_soon() -> tuple[str, ...]:
     """Modules whose tables are not in this database yet."""
     found = modules.available()
-    return tuple(label for name, (label, _) in modules.MODULES.items() if name not in found)
+    return tuple(label for name, (label, _) in modules.MODULES.items()
+                 if name not in found and name not in modules.UNLISTED)
 
 
 def navigation(user: CurrentUser | None, path: str) -> dict:
@@ -118,8 +159,8 @@ def navigation(user: CurrentUser | None, path: str) -> dict:
     sections = []
     for title, links in SECTIONS:
         visible = [
-            {"label": label, "href": href, "active": False}
-            for label, href, roles, module in links
+            {"label": label, "href": href, "active": False, "group": group[0] if group else title}
+            for label, href, roles, module, *group in links
             if (roles is None or user.role in roles) and (module is None or module in found)
         ]
         if visible:

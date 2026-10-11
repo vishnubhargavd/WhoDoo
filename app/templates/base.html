@@ -29,6 +29,22 @@
         {{ user.role | label }}{% if user.is_active_member %} · member{% endif %}
         {% if demo_auth %} · <a href="/logout">Switch user</a>{% endif %}
       </span>
+      {# The bell: unread count on the button, the list in a panel that opens under it (app.js). #}
+      <div class="bell-wrap" data-bell>
+        <button type="button" class="bell" aria-expanded="false" aria-controls="bell-panel" aria-label="Notifications">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg>
+          <span class="bell-count" hidden></span>
+        </button>
+        <section id="bell-panel" class="bell-panel" aria-label="Notifications" hidden>
+          <header class="bell-head">
+            <strong>Notifications</strong>
+            <button type="button" class="small secondary" data-bell-read-all hidden>Mark all read</button>
+          </header>
+          <ul class="bell-list"></ul>
+          <p class="bell-empty" hidden>You're all caught up.</p>
+          <a class="bell-all" href="/notifications">See all notifications</a>
+        </section>
+      </div>
       {% endif %}
       {% include "_menu.html" %}
     </header>
@@ -51,7 +67,7 @@
   </footer>
 </div>
 <div id="flash" class="notice error" role="status" aria-live="polite" hidden></div>
-<script src="/static/app.js"></script>
+<script src="{{ static('app.js') }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

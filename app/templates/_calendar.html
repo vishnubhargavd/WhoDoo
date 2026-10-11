@@ -1,0 +1,27 @@
+{# The events calendar: a month grid, and a panel listing everything on the chosen day.
+   Expects `calendar` (a list of events). Drawn by /static/calendar.js from the JSON below. #}
+<div class="calendar" data-calendar>
+  <div class="cal-main">
+    <div class="cal-bar">
+      <h3 class="cal-month" aria-live="polite"></h3>
+      <div class="cal-nav">
+        <button type="button" class="small secondary" data-cal="today">Today</button>
+        <button type="button" class="cal-arrow" data-cal="prev" aria-label="Previous month">‹</button>
+        <button type="button" class="cal-arrow" data-cal="next" aria-label="Next month">›</button>
+      </div>
+    </div>
+    <div class="cal-weekdays" aria-hidden="true">
+      {% for day in ("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat") %}<span>{{ day }}</span>{% endfor %}
+    </div>
+    <div class="cal-grid" role="grid" aria-label="Events by day"></div>
+    <p class="cal-legend"><span class="cal-key free"></span> Free <span class="cal-key paid"></span> Paid
+      <span class="cal-key plain"></span> No registration <span class="cal-key past"></span> Over</p>
+  </div>
+  <aside class="cal-day" aria-live="polite">
+    <h3 class="cal-day-title"></h3>
+    <p class="cal-day-count muted"></p>
+    <div class="cal-day-list"></div>
+  </aside>
+  <script type="application/json" class="cal-data">{{ calendar | tojson }}</script>
+  <noscript><p>The calendar needs JavaScript. <a href="/events">See the list of upcoming events</a> instead.</p></noscript>
+</div>
