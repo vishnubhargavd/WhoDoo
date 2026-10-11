@@ -16,7 +16,7 @@ from app.core.dependencies import get_current_user
 from app.core.errors import AppError
 from app.db.database import SessionLocal
 from app.services import fairseat_pricing, membership_service, modules, reminder_service
-from app.web import dev_auth, event_pages, member2_pages, module_pages, pages, public_pages
+from app.web import event_pages, member2_pages, module_pages, pages, public_pages
 from app.web.templating import APP_DIR, render
 
 logger = logging.getLogger("whodoo")
@@ -71,8 +71,6 @@ app.include_router(event_pages.router)
 app.include_router(module_pages.router)
 app.include_router(public_pages.router)
 app.include_router(member2_pages.router)
-if settings.demo_auth:
-    app.include_router(dev_auth.router)
 
 
 async def _signed_in_user(request: Request):
@@ -90,8 +88,8 @@ async def _error(request: Request, status_code: int, code: str, message: str, de
         return JSONResponse(
             {"error": {"code": code, "message": message, "details": details}}, status_code=status_code
         )
-    if status_code == 401 and settings.demo_auth:
-        return RedirectResponse(f"/dev/login?next={quote(request.url.path)}", status_code=303)
+    if status_code == 401 and settings.auth_mode == "local":
+        return RedirectResponse(f"/login?next={quote(request.url.path)}", status_code=303)
     user = await _signed_in_user(request)
     return render(request, "error.html", user, status_code=status_code, code=code, message=message)
 

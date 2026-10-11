@@ -1,3 +1,21 @@
+# Signing in
+
+Everyone signs in with their own username and password at `/login` ("Enter WhoDoo"). The page shows
+the club as a tree by rank: President, Treasurer, Event leads, Members, Volunteers. Picking a person
+opens a box for their username and password; the credentials must belong to the person picked.
+
+- `make credentials` gives anyone without a login a username and a random password and writes the list
+  to `credentials/` (`WhoDoo_credentials.xlsx`, `credentials.csv`). `make credentials-reset` gives
+  everybody a new password. `make seed` does this at the end.
+- `credentials/` is in `.gitignore`. It is the only readable copy of the passwords; the database keeps
+  salted scrypt hashes only (`user_credentials`, migration 045).
+- A wrong username and a wrong password give the same answer; five wrong tries lock a username for
+  five minutes. People change their own password with `PUT /api/v1/auth/password`.
+- The old passwordless picker (`/dev/login`) is removed. Ranks and what each may do are described in
+  `app/services/auth_service.py`.
+
+---
+
 # Printing, emails and cash flow
 
 - **Printing.** A ticket prints as one bordered sheet (portrait) and a certificate as one landscape

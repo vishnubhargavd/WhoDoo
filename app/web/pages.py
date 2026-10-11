@@ -25,6 +25,7 @@ from app.schemas.ledger import LedgerFilters
 from app.core.errors import AppError
 from app.services import (
     announcement_service,
+    auth_service,
     cashflow_service,
     event_service,
     expense_service,
@@ -147,13 +148,36 @@ async def whoami(user: CurrentUser | None = Depends(get_optional_user)):
     return {"id": str(user.id), "name": user.full_name} if user else {"id": None, "name": None}
 
 
+def safe_next(target: str | None) -> str:
+    """Where to go after signing in: a path on this site, never the public landing page or another site."""
+    ok = bool(target) and target.startswith("/") and not target.startswith("//") and "\\" not in target and target != "/"
+    return target if ok else "/home"
+
+
 @router.get("/login")
-async def login(next: str = "/home"):
-    """Where "Enter WhoDoo" leads. Today that is the demo sign-in; real sign-in will take this route over."""
-    if get_settings().demo_auth:
-        target = next if next.startswith("/") and not next.startswith("//") and next != "/" else "/home"
-        return RedirectResponse(f"/dev/login?next={quote(target)}", status_code=303)
-    raise AppError(503, "sign_in_unavailable", "Sign-in is not connected in this build yet")
+async def login(
+    request: Request, next: str = "/home", user: CurrentUser | None = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enter WhoDoo: the club's people as a tree, by rank. Picking someone asks for their username and password."""
+    if get_settings().auth_mode != "local":
+        raise AppError(503, "sign_in_unavailable", "Sign in through your college account")
+    if user is not None:
+        return RedirectResponse(safe_next(next), status_code=303)
+    return render(request, "login.html", None, clubs=await auth_service.hierarchy(db), next=safe_next(next))
+
+
+@router.get("/logout")
+async def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(get_settings().session_cookie)
+    return response
+
+
+@router.get("/dev/login")
+async def old_demo_login(next: str = "/home"):
+    """The passwordless demo picker is gone; its address leads to sign-in."""
+    return RedirectResponse(f"/login?next={quote(safe_next(next))}", status_code=303)
 
 
 @router.get("/treasurer")

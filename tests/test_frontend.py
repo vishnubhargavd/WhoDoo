@@ -47,7 +47,7 @@ async def test_landing_is_the_front_page_even_when_signed_in(client, world):
     assert "Hey Tara." in (await client.get("/home")).text
     client.cookies.clear()
     signed_out = await client.get("/home")
-    assert signed_out.status_code == 303 and signed_out.headers["location"] == "/dev/login?next=/home"
+    assert signed_out.status_code == 303 and signed_out.headers["location"] == "/login?next=/home"
 
 
 async def test_design_assets_exist_and_are_referenced(client):
@@ -61,26 +61,25 @@ async def test_design_assets_exist_and_are_referenced(client):
     assert (await client.get("/static/brand/hero-bg.webp")).status_code == 200
 
 
-async def test_login_route_leads_to_the_demo_sign_in(client, world):
-    response = await client.get("/login", params={"next": "/store"})
-    assert response.status_code == 303 and response.headers["location"] == "/dev/login?next=/store"
+async def test_login_page_is_the_club_tree_and_the_old_picker_is_gone(client, world):
+    page = await client.get("/login", params={"next": "/store"})
+    assert page.status_code == 200 and "Enter WhoDoo" in page.text
+    html = page.text
+    # President at the top, then down the ranks; every person is a node.
+    order = [html.index(label) for label in ("<strong>President</strong>", "<strong>Treasurer</strong>",
+                                             "<strong>Event leads</strong>", "<strong>Members</strong>", "<strong>Volunteers</strong>")]
+    assert order == sorted(order)
+    assert html.count('class="tree-node secondary"') == 7 and 'aria-label="Sign in as Tara Treasurer, Treasurer"' in html
+    assert 'id="login-box"' in html and 'name="username"' in html and 'type="password"' in html
+    assert "@test.example" not in html and 'next = "/store"' in html           # names and roles only, no emails
+    # The passwordless picker no longer exists: its address leads here, and it accepts nothing.
+    old = await client.get("/dev/login", params={"next": "/store"})
+    assert old.status_code == 303 and old.headers["location"] == "/login?next=/store"
+    assert (await client.post("/dev/login", data={"user_id": str(world.member.id)})).status_code in (404, 405)
     for unsafe in ("//evil.example", "https://evil.example", "/"):
-        response = await client.get("/login", params={"next": unsafe})
-        assert response.headers["location"] == "/dev/login?next=/home"   # after sign-in: their home, nowhere else
-    assert (await client.get("/login")).headers["location"] == "/dev/login?next=/home"
-
-    signed_in = await client.post("/dev/login", data={"user_id": str(world.member.id)})
-    assert signed_in.status_code == 303 and signed_in.headers["location"] == "/home"
-    assert (await client.get("/whoami")).json() == {"id": str(world.member.id), "name": "Mia Member"}
+        assert 'next = "/home"' in (await client.get("/login", params={"next": unsafe})).text
     out = await client.get("/logout")
     assert out.headers["location"] == "/login"
-    assert (await client.get("/whoami")).json() == {"id": None, "name": None}
-
-    page = (await client.get("/dev/login", params={"next": "/store"})).text
-    assert "Enter WhoDoo" in page and "Demo sign-in" in page
-    assert 'aria-label="Sign in as Tara Treasurer, Treasurer"' in page
-    assert page.count('name="user_id"') == 7 and 'name="next" value="/store"' in page
-
 
 async def test_home_shows_live_figures_for_the_person(client, db, world, auth):
     await ledger_service.record_income(

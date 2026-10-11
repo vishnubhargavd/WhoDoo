@@ -27,7 +27,7 @@
       <span class="who">
         <strong>{{ user.full_name }}</strong>
         {{ user.role | label }}{% if user.is_active_member %} · member{% endif %}
-        {% if demo_auth %} · <a href="/logout">Switch user</a>{% endif %}
+         · <a href="/logout">Sign out</a>
       </span>
       {# The bell: unread count on the button, the list in a panel that opens under it (app.js). #}
       <div class="bell-wrap" data-bell>

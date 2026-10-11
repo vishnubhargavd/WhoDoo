@@ -14,8 +14,8 @@ def _cookie(user) -> dict[str, str]:
 async def test_pages_redirect_to_sign_in(client):
     response = await client.get("/treasurer")
     assert response.status_code == 303
-    assert response.headers["location"] == "/dev/login?next=/treasurer"
-    assert (await client.get("/dev/login")).status_code == 200
+    assert response.headers["location"] == "/login?next=/treasurer"
+    assert (await client.get("/login")).status_code == 200
 
 
 async def test_treasurer_pages(client, db, world):

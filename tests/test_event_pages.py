@@ -25,7 +25,7 @@ async def test_pages_need_sign_in(client):
     public = await client.get("/events")
     assert public.status_code == 200 and "Upcoming events" in public.text
     response = await client.get("/events/new")
-    assert response.status_code == 303 and response.headers["location"] == "/dev/login?next=/events/new"
+    assert response.status_code == 303 and response.headers["location"] == "/login?next=/events/new"
 
 
 async def test_organizer_pages(client, world, auth):

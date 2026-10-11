@@ -832,3 +832,37 @@ button.brand-mark:hover { transform: scale(1.06); box-shadow: none; }
 .pay-bar .actions { margin: 0; justify-content: flex-end; }
 .notice + .pay-bar { margin-top: 14px; }
 .product .price { margin: 4px 0 10px; }
+
+/* --- Enter WhoDoo: the club as a tree --------------------------------------------------- */
+/* One row per rank, president at the top. A line runs down the middle from level to level,
+   and each row is a little narrower in voice than the one above: the further down, the less a
+   role can do. */
+.tree { width: 100%; max-width: 1040px; display: grid; gap: 0; text-align: center; }
+.tree-club { margin: 6px 0 14px; font: 400 1.6rem/1 var(--font-display); text-transform: uppercase; }
+.tree-level { position: relative; padding: 0 0 34px; }
+.tree-level::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 3px; height: 34px; margin-left: -1.5px; background: var(--ink); }
+.tree-level:last-child { padding-bottom: 0; }
+.tree-level:last-child::after { display: none; }
+.tree-label { display: inline-grid; gap: 2px; margin-bottom: 12px; padding: 8px 18px; border: var(--rule); border-radius: 999px; background: var(--ink); color: var(--paper); }
+.tree-label strong { font: 600 12px/1.2 var(--font-sans); letter-spacing: 0.1em; text-transform: uppercase; }
+.tree-label span { font-size: 12px; opacity: 0.75; }
+.tree-nodes { list-style: none; margin: 0; padding: 14px 12px 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; border-top: 3px solid var(--ink); }
+.tree-level.rank-1 .tree-nodes, .tree-level.rank-2 .tree-nodes { border-top-color: transparent; }
+.tree-node {
+  display: flex; align-items: center; gap: 10px; height: auto; min-height: 56px; padding: 8px 16px 8px 8px; border-radius: 999px;
+  background: var(--paper); color: var(--ink); text-transform: none; letter-spacing: 0; white-space: normal; text-align: left;
+}
+.tree-node:hover:not(:disabled) { box-shadow: var(--shadow-pop); transform: translate(-3px, -3px); }
+.tree-node .avatar { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border: var(--rule); border-radius: 50%; font: 400 20px/1 var(--font-display); background: var(--butter); }
+.tree-node .name { font-size: 15px; font-weight: 600; }
+.tree-node .role { font-size: 12px; color: var(--muted); }
+.tree-level.rank-1 .tree-node { min-height: 68px; padding-right: 22px; background: var(--butter); }
+.tree-level.rank-1 .tree-node .avatar { width: 50px; height: 50px; font-size: 26px; background: var(--paper); }
+.tree-level.rank-1 .tree-node .name { font-size: 18px; }
+.tree-level.rank-2 .tree-node .avatar { background: var(--mint); }
+.tree-level.rank-3 .tree-node .avatar { background: var(--blue-bg); }
+.tree-level.rank-4 .tree-node .avatar { background: var(--gray-bg); }
+.tree-level.rank-5 .tree-node .avatar { background: var(--red-bg); }
+#login-box form { display: grid; gap: 14px; min-width: min(22rem, 80vw); }
+#login-box h2 { margin: 0; }
+#login-box .muted { margin: -8px 0 0; }

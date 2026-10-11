@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Enter WhoDoo · Sign in</title>
+{% include "_head.html" %}
+</head>
+<body>
+<main class="frame">
+  <div class="panel signin">
+    <a class="brand" href="/" aria-label="WhoDoo home"><span class="brand-mark" aria-hidden="true"><span>W</span></span></a>
+    <h1>Enter WhoDoo</h1>
+    <p class="sub" style="margin: 0 auto">Find yourself in the club, then sign in with your username and password.
+      Not in a club? <a href="/events">Browse events</a> without signing in.</p>
+
+    {% for club in clubs %}
+    {# The club as a tree: the president at the top, and each level below can do less than the one above. #}
+    <section class="tree" aria-label="{{ club.club }}, by role">
+      <h2 class="tree-club">{{ club.club }}</h2>
+      {% for level in club.levels %}
+      <div class="tree-level rank-{{ level.rank }}">
+        <div class="tree-label"><strong>{{ level.label }}</strong><span>{{ level.what }}</span></div>
+        <ul class="tree-nodes">
+          {% for person in level.people %}
+          <li>
+            <button type="button" class="tree-node secondary" data-user="{{ person.id }}" data-name="{{ person.full_name }}"
+                    data-role="{{ level.label }}" {{ "disabled" if not person.can_sign_in }}
+                    aria-label="Sign in as {{ person.full_name }}, {{ level.role | label }}">
+              <span class="avatar" aria-hidden="true">{{ person.full_name[0] }}</span>
+              <span class="name">{{ person.full_name }}</span>
+              {% if not person.can_sign_in %}<span class="role">no login yet</span>{% endif %}
+            </button>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endfor %}
+    </section>
+    {% else %}
+    <div class="card" style="max-width: 520px"><p class="empty">No users yet. Run <code>make seed</code> first.</p></div>
+    {% endfor %}
+  </div>
+</main>
+
+{# The sign-in box: part of the page, opened over it when someone is picked. #}
+<dialog class="modal" id="login-box" aria-labelledby="login-title">
+  <form id="login-form" novalidate>
+    <h2 id="login-title">Sign in</h2>
+    <p class="muted" id="login-who"></p>
+    <label>Username <input type="text" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false"></label>
+    <label>Password <input type="password" name="password" required autocomplete="current-password"></label>
+    <p class="notice error" id="login-error" role="alert" hidden></p>
+    <div class="actions" style="justify-content: flex-end">
+      <button type="button" class="secondary" id="login-cancel">Cancel</button>
+      <button type="submit">Sign in</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="flash" class="notice error" role="status" aria-live="polite" hidden></div>
+<script src="{{ static('app.js') }}"></script>
+<script>
+(() => {
+  const box = document.getElementById("login-box"), form = document.getElementById("login-form");
+  const error = document.getElementById("login-error"), who = document.getElementById("login-who");
+  const next = {{ next | tojson }};
+  let picked = null;
+
+  document.querySelectorAll(".tree-node").forEach((node) => node.addEventListener("click", () => {
+    picked = node.dataset.user;
+    who.textContent = `${node.dataset.name} · ${node.dataset.role}`;
+    error.hidden = true;
+    form.reset();
+    box.showModal();
+    form.username.focus();
+  }));
+  document.getElementById("login-cancel").addEventListener("click", () => box.close());
+  box.addEventListener("click", (event) => { if (event.target === box) box.close(); });   // a click outside the box
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const button = form.querySelector("button[type=submit]");
+    if (!form.username.value.trim() || !form.password.value) { error.textContent = "Enter your username and password."; error.hidden = false; return; }
+    button.disabled = true;
+    try {
+      await api("POST", "/api/v1/auth/login", { username: form.username.value.trim(), password: form.password.value, user_id: picked });
+      window.location.href = next;
+    } catch (failure) {
+      error.textContent = failure.message;
+      error.hidden = false;
+      form.password.value = "";
+      form.password.focus();
+      button.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>

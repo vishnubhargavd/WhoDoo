@@ -583,8 +583,8 @@ async def test_local_demo_sign_in_still_works(client, world, auth):
     forged = jwt.encode({"sub": str(world.president.id), "exp": int(time.time()) + 600}, "wrong-" * 8, algorithm="HS256")
     response = await client.get("/api/v1/events", headers={"Authorization": f"Bearer {forged}"})
     assert (response.status_code, code(response)) == (401, "invalid_token")
-    response = await client.post("/dev/login", data={"user_id": str(world.member.id), "next": "/home"})
-    assert response.status_code == 303 and get_settings().session_cookie in response.cookies
+    # Signing in is by username and password now; the passwordless picker is gone.
+    assert (await client.post("/dev/login", data={"user_id": str(world.member.id), "next": "/home"})).status_code in (404, 405)
 
 
 async def test_jwks_outage_is_a_503_through_the_api(client, world, db, supabase_mode, identity_column):
