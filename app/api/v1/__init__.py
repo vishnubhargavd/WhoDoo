@@ -8,6 +8,7 @@ from app.api.v1 import (
     fairseat,
     fairseat_payments,
     ledger,
+    member2,
     memberships,
     merch,
     payments,
@@ -33,6 +34,9 @@ api_router.include_router(fairseat.router)
 api_router.include_router(event_tickets.router)
 api_router.include_router(event_tickets.discovery)
 api_router.include_router(fairseat_payments.router)
+# Member 2: profile and UPI id, notifications, event budget
+api_router.include_router(member2.me)
+api_router.include_router(member2.events)
 # MemberCore, GateSync, CrewDoo Connect, CertiDoo, LegacyVault (each 404 until its tables exist)
 api_router.include_router(memberships.router)
 api_router.include_router(community.checkin)

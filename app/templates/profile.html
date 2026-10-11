@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Profile · WhoDoo{% endblock %}
+{% block content %}
+<h1>Your profile</h1>
+<p class="sub">What the club knows about you. Only you can change these details.</p>
+
+{% if not profile.profile_available %}
+<div class="notice info">Phone, department and UPI details are not switched on in this deployment yet. You can still change your name.</div>
+{% endif %}
+
+<div class="card">
+  <h2>Details</h2>
+  <form id="profile-form" class="stack">
+    <div class="form-row">
+      <label>Full name <input type="text" name="full_name" value="{{ profile.full_name }}" required maxlength="120"></label>
+      {% if profile.profile_available %}
+      <label>Display name <input type="text" name="display_name" value="{{ profile.display_name or '' }}" maxlength="60" placeholder="What people call you"></label>
+      {% endif %}
+    </div>
+    {% if profile.profile_available %}
+    <div class="form-row">
+      <label>Phone <input type="tel" name="phone" value="{{ profile.phone or '' }}" maxlength="20" placeholder="+91 98765 43210"></label>
+      <label>Department <input type="text" name="department" value="{{ profile.department or '' }}" maxlength="80" placeholder="Computer Science"></label>
+      <label>Academic year
+        <select name="academic_year">
+          <option value="">—</option>
+          {% for year in range(1, 7) %}<option value="{{ year }}" {{ "selected" if profile.academic_year == year }}>Year {{ year }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    {% endif %}
+    <p class="muted profile-note">Sign-in email <strong>{{ profile.email }}</strong> · role <strong>{{ profile.role | label }}</strong>.
+      These, and your membership status and expiry, are managed by the club and cannot be edited here.</p>
+    <div class="actions"><button type="submit">Save details</button></div>
+  </form>
+</div>
+
+{% if profile.profile_available %}
+<div class="card">
+  <h2>UPI id for reimbursements</h2>
+  {% if profile.payment %}
+  <p>On file: <strong>{{ profile.payment.upi_masked }}</strong> <span class="muted">· only the format has been checked</span></p>
+  {% endif %}
+  <form data-api="PUT" action="/api/v1/me/payment-profile" class="upi-row">
+    <label>{{ "Replace UPI id" if profile.payment else "UPI id" }}
+      <input type="text" name="upi_id" required maxlength="320" autocomplete="off" spellcheck="false" placeholder="yourname@okbank"></label>
+    <button type="submit">Save UPI id</button>
+    {% if profile.payment %}
+    <button type="button" class="secondary danger" data-delete="/api/v1/me/payment-profile"
+            data-confirm="Remove your UPI id? Reimbursements will then be paid another way.">Remove</button>
+    {% endif %}
+  </form>
+  <p class="muted profile-note">Where the treasurer can send your approved expense claims. It is stored encrypted and shown masked.
+    Saving it does <strong>not</strong> let anyone take money from you, and nothing is paid to it automatically:
+    the treasurer pays you and marks the claim paid.</p>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+// Every field is sent, so clearing one (a phone number, say) clears it on the server too.
+document.getElementById("profile-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target, button = form.querySelector("button[type=submit]");
+  const body = {};
+  for (const [key, value] of new FormData(form).entries()) body[key] = value.trim() === "" ? null : value.trim();
+  if (body.academic_year) body.academic_year = Number(body.academic_year);
+  button.disabled = true;
+  try {
+    await api("PUT", "/api/v1/me/profile", body);
+    sessionStorage.setItem("flash", "Profile saved.");
+    window.location.reload();
+  } catch (error) {
+    showMessage(error.message);
+    button.disabled = false;
+  }
+});
+</script>
+{% endblock %}

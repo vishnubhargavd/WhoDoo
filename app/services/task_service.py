@@ -15,11 +15,20 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser
-from app.core.errors import bad_request, conflict, forbidden, not_found
+from app.core.errors import AppError, bad_request, conflict, forbidden, not_found
 from app.models.crewpulse import CrewTask, CrewTaskActivity
 from app.models.shared import Event, User
 from app.schemas.crewpulse import AssigneeOut, TaskActivityOut, TaskCreate, TaskOut, TaskStatusChange, TaskUpdate
-from app.services import autopilot, event_service, registration_service, shared_directory
+from app.models.member2 import CrewTaskShift
+from app.services import (
+    assignment_review,
+    audit_service,
+    autopilot,
+    event_service,
+    modules,
+    registration_service,
+    shared_directory,
+)
 from app.services.event_service import utcnow
 
 OPEN_EVENT_STATUSES = ("draft", "published")
@@ -60,6 +69,39 @@ async def _flush_unique(db: AsyncSession) -> None:
         raise
 
 
+async def _save_shift(db: AsyncSession, task: CrewTask, shift: tuple[datetime, datetime] | None) -> None:
+    current = await db.get(CrewTaskShift, task.id) if modules.migrated("crew_shifts") else None
+    if shift is None:
+        if current is not None:
+            await db.delete(current)
+        return
+    if not modules.migrated("crew_shifts"):
+        raise AppError(404, "module_unavailable", "Task shifts are not switched on in this deployment")
+    if current is None:
+        db.add(CrewTaskShift(task_id=task.id, club_id=task.club_id, starts_at=shift[0], ends_at=shift[1]))
+    else:
+        current.starts_at, current.ends_at = shift
+
+
+async def _review_assignment(db: AsyncSession, user: CurrentUser, event: Event, *, assignee_id: uuid.UUID,
+                             title: str, shift, override_reason: str | None, task_id: uuid.UUID | None):
+    """Duplicate and clash checks (assignment_review). Returns the flagged issues an override accepted."""
+    result = await assignment_review.enforce(
+        db, club_id=user.club_id, event=event, assignee_id=assignee_id, title=title, shift=shift,
+        override_reason=override_reason, exclude_task_id=task_id)
+    return result.issues
+
+
+def _record_override(db: AsyncSession, user: CurrentUser, task: CrewTask, issues, reason: str) -> None:
+    _log(db, task, user, "updated", note=f"Assigned despite review ({', '.join(sorted({i.code for i in issues}))}): {reason}")
+    audit_service.record(
+        db, club_id=task.club_id, actor_id=user.id, action="crewpulse.assignment_override", entity_type="crew_task",
+        entity_id=task.id,
+        details={"assignee_id": str(task.assignee_id), "reason": reason,
+                 "issues": [{"code": i.code, "task_id": str(i.task_id) if i.task_id else None} for i in issues]},
+    )
+
+
 async def _load(db: AsyncSession, user: CurrentUser, task_id: uuid.UUID) -> tuple[CrewTask, Event]:
     task = await db.get(CrewTask, task_id)
     if task is None or task.club_id != user.club_id:
@@ -74,6 +116,7 @@ async def to_out(db: AsyncSession, user: CurrentUser, tasks: list[CrewTask], now
     now = now or utcnow()
     people = await shared_directory.get_users(db, [t.assignee_id for t in tasks])
     events = {e.id: e for e in await db.scalars(select(Event).where(Event.id.in_({t.event_id for t in tasks})))} if tasks else {}
+    shifts = await assignment_review.shifts_for(db, [t.id for t in tasks])
     result = []
     for task in tasks:
         event = events[task.event_id]
@@ -83,6 +126,8 @@ async def to_out(db: AsyncSession, user: CurrentUser, tasks: list[CrewTask], now
             "event_starts_at": event.starts_at,
             "assignee_name": people[task.assignee_id].full_name if task.assignee_id in people else None,
             "risks": autopilot.task_risks(event_service.task_snapshot(task), event.starts_at, now),
+            "shift_starts_at": shifts[task.id][0] if task.id in shifts else None,
+            "shift_ends_at": shifts[task.id][1] if task.id in shifts else None,
             "can_edit": organizer and event.status in OPEN_EVENT_STATUSES,
             "can_update_status": (organizer or task.assignee_id == user.id) and event.status in OPEN_EVENT_STATUSES,
         }))
@@ -129,16 +174,25 @@ async def create_task(
     _ensure_open(event)
     if data.due_at and data.due_at <= now:
         raise bad_request("due_in_past", "The deadline must be in the future")
+    shift = (data.shift_starts_at, data.shift_ends_at) if data.shift_starts_at else None
+    overridden = []
     if data.assignee_id:
+        # A participant is refused outright; duplicates and clashes can be overridden with a reason.
         await _check_assignee(db, user.club_id, data.assignee_id, event)
+        overridden = await _review_assignment(db, user, event, assignee_id=data.assignee_id, title=data.title,
+                                              shift=shift, override_reason=data.override_reason, task_id=None)
 
-    task = CrewTask(club_id=user.club_id, event_id=event.id, created_by=user.id, status="todo",
-                    **data.model_dump())
+    fields = data.model_dump(exclude={"shift_starts_at", "shift_ends_at", "override_reason"})
+    task = CrewTask(club_id=user.club_id, event_id=event.id, created_by=user.id, status="todo", **fields)
     db.add(task)
     await _flush_unique(db)
+    await _save_shift(db, task, shift)
     _log(db, task, user, "created", new=task.title)
     if task.assignee_id:
         _log(db, task, user, "assigned", new=task.assignee_id)
+    if overridden:
+        _record_override(db, user, task, overridden, data.override_reason)
+    await db.flush()
     return task
 
 
@@ -151,12 +205,28 @@ async def update_task(
         raise forbidden("Only the president or this event's lead can edit or assign tasks")
     _ensure_open(event)
     changes = data.model_dump(exclude_unset=True)
+    override_reason = changes.pop("override_reason", None)
+    clear_shift = changes.pop("clear_shift", False)
+    new_shift_start, new_shift_end = changes.pop("shift_starts_at", None), changes.pop("shift_ends_at", None)
+    old_shift = await assignment_review.shift_of(db, task.id)
+    shift = None if clear_shift else (new_shift_start, new_shift_end) if new_shift_start else old_shift
     if changes.pop("unassign", False):
         changes["assignee_id"] = None
     if "due_at" in changes and changes["due_at"] and changes["due_at"] != task.due_at and changes["due_at"] <= now:
         raise bad_request("due_in_past", "The deadline must be in the future")
     if changes.get("assignee_id") and changes["assignee_id"] != task.assignee_id:
         await _check_assignee(db, user.club_id, changes["assignee_id"], event)
+
+    # Review whenever the result is an assignment that is new or changed in what or when.
+    assignee = changes["assignee_id"] if "assignee_id" in changes else task.assignee_id
+    title = changes.get("title") or task.title
+    overridden = []
+    if assignee and (assignee != task.assignee_id or title != task.title or shift != old_shift):
+        overridden = await _review_assignment(db, user, event, assignee_id=assignee, title=title, shift=shift,
+                                              override_reason=override_reason, task_id=task.id)
+    if shift != old_shift:
+        await _save_shift(db, task, shift)
+        _log(db, task, user, "updated", note="shift")
 
     if "assignee_id" in changes and changes["assignee_id"] != task.assignee_id:
         _log(db, task, user, "assigned", task.assignee_id, changes["assignee_id"])
@@ -167,6 +237,9 @@ async def update_task(
     if edited:
         _log(db, task, user, "updated", note=", ".join(edited))
     await _flush_unique(db)
+    if overridden:
+        _record_override(db, user, task, overridden, override_reason)
+        await db.flush()
     return task
 
 

@@ -5,7 +5,9 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db
-from app.schemas.crewpulse import TaskCreate, TaskOut
+from app.core.errors import not_found
+from app.models.crewpulse import CrewTask
+from app.schemas.crewpulse import AssignmentReviewIn, AssignmentReviewOut, TaskCreate, TaskOut
 from app.schemas.events import (
     EventCreate,
     EventOut,
@@ -14,7 +16,7 @@ from app.schemas.events import (
     ReadinessOut,
     ScheduleCheckOut,
 )
-from app.services import event_service, fairseat_payments, task_service
+from app.services import assignment_review, event_service, fairseat_payments, task_service
 
 router = APIRouter(prefix="/events", tags=["Event Management"])
 
@@ -106,6 +108,28 @@ async def event_tasks(
 ) -> list[TaskOut]:
     event = await event_service.get_visible_event(db, user, event_id)
     return await task_service.to_out(db, user, await task_service.list_for_event(db, event))
+
+
+@router.post("/{event_id}/tasks/review", response_model=AssignmentReviewOut, tags=["CrewPulse"])
+async def review_assignment(
+    event_id: uuid.UUID,
+    body: AssignmentReviewIn,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AssignmentReviewOut:
+    """Organizers: duplicate and clash checks for an assignment before saving it. Changes nothing.
+    Saving runs the same checks again; a flagged assignment then needs `override_reason`."""
+    event = await event_service.get_managed_event(db, user, event_id)
+    if body.task_id is not None:
+        task = await db.get(CrewTask, body.task_id)
+        if task is None or task.event_id != event.id:
+            raise not_found("Task")
+    shift = (body.shift_starts_at, body.shift_ends_at) if body.shift_starts_at and body.shift_ends_at else None
+    if shift is None and body.task_id is not None:
+        shift = await assignment_review.shift_of(db, body.task_id)
+    offered = {person.id for person in await task_service.assignable_people(db, user.club_id, event.id)}
+    return await assignment_review.review(db, club_id=user.club_id, event=event, assignee_id=body.assignee_id,
+                                          title=body.title, shift=shift, exclude_task_id=body.task_id, eligible=offered)
 
 
 @router.post("/{event_id}/tasks", response_model=TaskOut, status_code=201, tags=["CrewPulse"])

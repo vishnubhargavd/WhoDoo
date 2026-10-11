@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Crew clashes · WhoDoo{% endblock %}
+{% block content %}
+<h1>Crew clashes</h1>
+<p class="sub">Volunteers holding duplicate tasks, or duties that overlap, across {{ "every open event" if user.role == "president" else "the events you lead" }}.
+  New assignments are checked as they are made; this is what is standing right now.</p>
+{% set names = {"exact_duplicate": "Exact duplicate", "near_duplicate": "Near duplicate", "overlapping_shift": "Overlapping shifts",
+                "event_clash": "Two events at once", "over_limit": "Too many tasks"} %}
+
+<div class="card">
+  <h2>Needs a look <span class="badge {{ 'failed' if flagged else 'paid' }}">{{ flagged | length }}</span></h2>
+  {% if flagged %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Volunteer</th><th>Task</th><th>Event</th><th>What is wrong</th><th></th></tr></thead>
+    <tbody>
+      {% for row in flagged %}
+      <tr>
+        <td>{{ row.person.full_name if row.person else "Unknown" }}<br><span class="muted">{{ row.person.role | label if row.person else "" }}</span></td>
+        <td>{{ row.task.title }}
+          {% if row.shift %}<br><span class="muted">Shift {{ row.shift[0] | ist('%d %b %H:%M') }}–{{ row.shift[1] | ist('%H:%M') }}</span>{% endif %}</td>
+        <td>{{ row.event.name }}<br><span class="muted">{{ row.event.starts_at | ist('%d %b, %H:%M') }}</span></td>
+        <td>{% for issue in row.issues %}
+          <p style="margin: 0 0 4px"><span class="badge {{ 'failed' if issue.blocking else 'pending' }}">{{ names[issue.code] }}</span> {{ issue.message }}</p>
+          {% endfor %}</td>
+        <td><a class="button small secondary" href="/events/{{ row.event.id }}">Open event</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="muted">To fix one, open the event and give the task to someone else, or remove the duplicate.</p>
+  {% else %}
+  <p class="empty">No duplicates and no clashes. Everyone's duties fit.</p>
+  {% endif %}
+</div>
+
+{% if overrides %}
+<div class="card">
+  <h2>Assigned anyway</h2>
+  <p class="muted">Times an organiser went ahead despite a flag, and why.</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>When</th><th>By</th><th>Task</th><th>Flagged for</th><th>Reason given</th></tr></thead>
+    <tbody>
+      {% for o in overrides %}
+      <tr><td class="nowrap">{{ o.when | nice_date }}</td><td>{{ o.by }}</td>
+        <td><a href="/events/{{ o.event_id }}">{{ o.task }}</a><br><span class="muted">{{ o.event }}</span></td>
+        <td>{% for c in o.codes %}<span class="badge pending">{{ names.get(c, c) }}</span> {% endfor %}</td>
+        <td>{{ o.reason }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}

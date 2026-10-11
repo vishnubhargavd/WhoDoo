@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Notifications · WhoDoo{% endblock %}
+{% block content %}
+<div class="actions" style="justify-content: space-between">
+  <div>
+    <h1>Notifications</h1>
+    <p class="sub">Renewal reminders and announcements, newest first. The bell at the top shows the unread ones.</p>
+  </div>
+  {% if feed.unread %}<button type="button" class="secondary" data-read-all-page>Mark all read</button>{% endif %}
+</div>
+
+{% for n in feed.items %}
+<article class="card notification {{ 'unread' if not n.read }}">
+  <div class="actions" style="justify-content: space-between; align-items: flex-start">
+    <div>
+      <h2>{{ n.title }} {% if not n.read %}<span class="badge pending">New</span>{% endif %}</h2>
+      <p class="muted">{{ "Membership" if n.kind == "renewal" else "Announcement" }} · {{ n.created_at | nice_date }}</p>
+      <p>{{ n.message }}</p>
+    </div>
+    <span class="actions">
+      <a class="button small" href="{{ n.href }}">{{ "Renew now" if n.kind == "renewal" else "Open" }}</a>
+      {% if not n.read %}<button type="button" class="small secondary" data-post="{{ n.read_url }}" data-unread>Mark read</button>{% endif %}
+    </span>
+  </div>
+</article>
+{% else %}
+<div class="card"><p class="empty">Nothing yet. Renewal reminders arrive 30, 14, 7 and 1 days before a membership runs out, and
+  announcements appear here as they are posted.</p></div>
+{% endfor %}
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelector("[data-read-all-page]")?.addEventListener("click", async (event) => {
+  event.target.disabled = true;
+  try {
+    for (const button of document.querySelectorAll("[data-unread]")) await api("POST", button.dataset.post);
+    window.location.reload();
+  } catch (error) { showMessage(error.message); event.target.disabled = false; }
+});
+</script>
+{% endblock %}

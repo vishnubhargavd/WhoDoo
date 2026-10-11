@@ -1,0 +1,10 @@
+{# Unread membership renewal reminders, with a Renew Now action. Expects `reminders`. #}
+{% for r in reminders if not r.read %}
+<div class="notice {{ 'error' if r.stage == 'expired' or r.stage == 'd1' else 'info' }} reminder">
+  <strong>{{ r.title }}.</strong> {{ r.message }}
+  <span class="actions" style="display: inline-flex; margin-left: 8px">
+    <a class="button small" href="{{ r.renew_url }}">Renew now</a>
+    <button type="button" class="small secondary" data-post="/api/v1/me/notifications/{{ r.id }}/read">Dismiss</button>
+  </span>
+</div>
+{% endfor %}
