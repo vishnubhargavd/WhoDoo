@@ -6,3 +6,5 @@ __pycache__/
 uploads/
 .DS_Store
 outbox/
+# Readable sign-in details written by scripts/setup_credentials.py. Never commit.
+credentials/

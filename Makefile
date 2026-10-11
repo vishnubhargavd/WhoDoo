@@ -7,7 +7,7 @@ PORT    ?= 8000
 PG_BIN  ?= $(shell brew --prefix postgresql@16 2>/dev/null)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: help setup install env db-start db-stop db-create migrate migrate-pending seed seed-finance seed-events seed-modules modules seed-all run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend test-fairseat test-modules test-member2 test-registrations purge-registrations email-test test-web test-all fairseat-vectors payments stripe-listen receipts psql clean
+.PHONY: help setup install env db-start db-stop db-create migrate migrate-pending seed seed-finance seed-events seed-modules modules seed-all credentials credentials-reset run test test-events test-ledger test-expenses test-approvals test-ocr test-merch test-pages test-frontend test-fairseat test-modules test-member2 test-registrations purge-registrations email-test test-web test-all fairseat-vectors payments stripe-listen receipts psql clean
 
 help: ## Show this list
 	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -53,7 +53,13 @@ modules: migrate seed-modules ## Add the module demo data to a database that alr
 
 seed-all: seed ## Same as seed
 
-seed: seed-finance seed-events seed-modules ## Wipe the local database and load all demo data (finance, events, then memberships, tickets, announcements)
+seed: seed-finance seed-events seed-modules credentials-reset ## Wipe the local database and load all demo data (finance, events, then memberships, tickets, announcements)
+
+credentials: install ## Give anyone without a login a username and password; list them in credentials/ (never committed)
+	$(PY) -m scripts.setup_credentials
+
+credentials-reset: install ## New passwords for everybody, written to credentials/
+	$(PY) -m scripts.setup_credentials --reset
 
 seed-finance: install ## Wipe the local database and load people, money and merchandise demo data
 	$(PY) -m scripts.seed_finance_demo --reset
