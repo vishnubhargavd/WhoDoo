@@ -1,17 +1,31 @@
 {% extends "base.html" %}
 {% block title %}Check-in · {{ door.event.name }} · WhoDoo{% endblock %}
 {% block content %}
+<link rel="stylesheet" href="{{ static('events.css') }}">
+<p><a href="/check-in">← Other events</a></p>
 <h1>{{ door.event.name }}</h1>
-<p class="sub" data-door="{{ door.event.id }}"><strong id="door-count">{{ door.checked_in }}</strong> of {{ door.total }} checked in · <a href="/check-in">Other events</a></p>
+<p class="sub">{{ door.event.starts_at | ist }} IST · {{ door.event.venue or "Venue to be announced" }}</p>
+
+<div class="card door-count" data-door="{{ door.event.id }}">
+  <p><strong id="door-count">{{ door.checked_in }}</strong> of <span id="door-total">{{ door.total }}</span> checked in</p>
+  <div class="progress" aria-hidden="true"><span id="door-bar" style="width: {{ (door.checked_in * 100 // door.total) if door.total else 0 }}%"></span></div>
+</div>
 
 <div class="card">
   <h2>Scan a ticket</h2>
-  <p id="scan-note" class="muted">Point the camera at the QR code on the ticket.</p>
-  <div class="actions"><button id="scan-start">Start camera</button></div>
-  <video id="scan-video" playsinline muted hidden></video>
+  <p id="scan-note" class="muted">Start the camera and hold each ticket's QR code up to it. A code admits one person, once.</p>
+  <div class="actions">
+    <button type="button" id="scan-start">Start camera</button>
+    <button type="button" id="scan-stop" class="secondary" hidden>Stop camera</button>
+  </div>
+  <div id="scan-frame" class="scan-frame" hidden>
+    <video id="scan-video" playsinline muted></video>
+    <span class="scan-target" aria-hidden="true"></span>
+  </div>
   <div id="scan-result" class="scan-result" role="status" aria-live="assertive" hidden><strong></strong><span></span></div>
   <form id="scan-manual" class="actions" style="margin-top: 12px">
-    <input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="whodoo.ticket.v1.…" aria-label="Ticket code" style="flex: 1; min-width: 220px">
+    <input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Or type / paste a ticket code"
+           aria-label="Ticket code" style="flex: 1; min-width: 220px">
     <button type="submit" class="secondary">Check code</button>
   </form>
 </div>
@@ -19,22 +33,36 @@
 <div class="card">
   <h2>Guest list</h2>
   {% if door.guests %}
+  <div class="actions" style="margin-bottom: 12px">
+    <input type="search" id="guest-search" placeholder="Search by name, student ID or participant ID" aria-label="Search the guest list"
+           style="flex: 1; min-width: 220px">
+    <span class="actions" role="group" aria-label="Show">
+      <button type="button" class="small secondary" data-guest-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="small secondary" data-guest-filter="out" aria-pressed="false">Not arrived</button>
+      <button type="button" class="small secondary" data-guest-filter="in" aria-pressed="false">Arrived</button>
+    </span>
+  </div>
   <div class="table-wrap"><table>
-    <thead><tr><th>Holder</th><th>Ticket</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Ticket</th><th>Status</th><th></th></tr></thead>
     <tbody>
       {% for g in door.guests %}
-      <tr data-ticket="{{ g.registration_id or g.ticket_id }}">
-        <td>{{ g.holder_name }}</td><td>{{ g.category }}{% if g.seat_number %} · #{{ g.seat_number }}{% endif %}</td>
+      {% set id = g.registration_id or g.ticket_id %}
+      <tr data-guest="{{ id }}" data-status="{{ g.status }}" data-search="{{ (g.holder_name ~ ' ' ~ g.category) | lower }}"
+          data-name="{{ g.holder_name }}" data-detail="{{ g.category }}{% if g.seat_number %} · seat {{ g.seat_number }}{% endif %}">
+        <td>{{ g.holder_name }}</td>
+        <td>{{ g.category }}{% if g.seat_number %} · #{{ g.seat_number }}{% endif %}</td>
         <td><span class="badge {{ 'paid' if g.status == 'checked_in' else 'pending' }}">{{ "Checked in" if g.status == "checked_in" else "Not arrived" }}</span>
-          {% if g.checked_in_at %}<span class="muted">{{ g.checked_in_at | ist('%H:%M') }}</span>{% endif %}</td>
-        <td>{% if g.status != "checked_in" %}<button class="small secondary" {% if g.registration_id %}data-admit-registration="{{ g.registration_id }}"{% else %}data-admit="{{ g.ticket_id }}"{% endif %}>Check in</button>{% endif %}</td>
+          <span class="muted guest-when">{{ g.checked_in_at | ist('%H:%M') if g.checked_in_at else "" }}</span></td>
+        <td>{% if g.status != "checked_in" %}<button type="button" class="small secondary"
+              {% if g.registration_id %}data-admit-registration="{{ g.registration_id }}"{% else %}data-admit="{{ g.ticket_id }}"{% endif %}>Check in</button>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table></div>
+  <p id="guest-none" class="empty" hidden>Nobody on the list matches.</p>
   {% else %}
   <p class="empty">Nobody holds a ticket for this event yet.</p>
   {% endif %}
 </div>
 {% endblock %}
-{% block scripts %}<script src="/static/modules.js"></script>{% endblock %}
+{% block scripts %}<script src="{{ static('door.js') }}"></script>{% endblock %}

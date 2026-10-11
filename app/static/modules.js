@@ -1,4 +1,4 @@
-// Booking, paying and scanning for the Memberships, Tickets and Check-in pages.
+// Booking and paying for the Memberships and Tickets pages. (The door has its own script, door.js.)
 // Uses api(), showMessage() and askDialog() from app.js.
 
 function rupees(paise) {
@@ -65,20 +65,13 @@ async function bookTickets(form) {
 }
 
 document.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-pay-membership], [data-pay-booking], [data-admit], [data-admit-registration]");
+  const button = event.target.closest("[data-pay-membership], [data-pay-booking]");
   if (!button) return;
   event.preventDefault();
   button.disabled = true;
   try {
     if (button.hasAttribute("data-pay-membership")) await payMembership();
-    else if (button.dataset.payBooking) await payBooking(button.dataset.payBooking);
-    else {
-      const door = document.querySelector("[data-door]");
-      const who = button.dataset.admitRegistration
-        ? { registration_id: button.dataset.admitRegistration } : { ticket_id: button.dataset.admit };
-      showScan(await api("POST", "/api/v1/check-in/manual", { event_id: door.dataset.door, ...who }));
-      setTimeout(() => window.location.reload(), 1200);
-    }
+    else await payBooking(button.dataset.payBooking);
   } catch (error) {
     showMessage(error.message);
   }
@@ -93,91 +86,4 @@ document.addEventListener("submit", async (event) => {
   button.disabled = true;
   try { await bookTickets(form); } catch (error) { showMessage(error.message); }
   button.disabled = false;
-});
-
-// --- The door ------------------------------------------------------------------------
-
-const SCAN_TEXT = {
-  redeemed: ["ok", "Checked in"],
-  already_checked_in: ["warn", "Already checked in"],
-  wrong_event: ["bad", "Ticket is for a different event"],
-  revoked: ["bad", "Ticket is cancelled"],
-  expired: ["bad", "This event is not admitting"],
-  unrecognized: ["bad", "Not a ticket we issued"],
-  invalid_credential: ["bad", "Not a WhoDoo ticket code"],
-};
-
-function showScan(result) {
-  const box = document.getElementById("scan-result");
-  if (!box) return;
-  const [kind, text] = SCAN_TEXT[result.status] || ["bad", "Could not check this ticket"];
-  box.className = "scan-result " + kind;
-  box.hidden = false;
-  box.querySelector("strong").textContent = text;
-  let who = "";
-  if (result.holderName && result.studentId) who = `${result.holderName} · student ID ${result.studentId} · ${result.participantCode}`;
-  else if (result.holderName) who = `${result.holderName} · ${result.categoryName} · seat ${result.seatNumber} of ${result.partySize}`;
-  const when = result.status === "already_checked_in" ? ` · at ${new Date(result.checkedInAt).toLocaleTimeString()}` : "";
-  box.querySelector("span").textContent = who + when;
-  if (result.status === "redeemed") {
-    const count = document.getElementById("door-count");
-    if (count) count.textContent = String(Number(count.textContent) + 1);
-    const row = document.querySelector(`[data-ticket="${result.redemptionId}"]`);
-    if (row) { row.querySelector(".badge").textContent = "Checked in"; row.querySelector(".badge").className = "badge paid"; const b = row.querySelector("button"); if (b) b.remove(); }
-  }
-}
-
-async function submitScan(value) {
-  const door = document.querySelector("[data-door]");
-  try { showScan(await api("POST", "/api/v1/check-in/scan", { event_id: door.dataset.door, credential: value })); }
-  catch (error) { showMessage(error.message); }
-}
-
-document.addEventListener("DOMContentLoaded", () => {
-  const door = document.querySelector("[data-door]");
-  if (!door) return;
-  const manual = document.getElementById("scan-manual");
-  manual.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const field = manual.querySelector("input");
-    if (field.value.trim()) submitScan(field.value.trim());
-    field.value = "";
-    field.focus();
-  });
-
-  const start = document.getElementById("scan-start");
-  const video = document.getElementById("scan-video");
-  const note = document.getElementById("scan-note");
-  if (!("BarcodeDetector" in window) || !navigator.mediaDevices) {
-    start.hidden = true;
-    note.textContent = "This browser cannot read QR codes from the camera. Type or paste the code below, use a handheld scanner, or check people in from the guest list.";
-    return;
-  }
-  start.addEventListener("click", async () => {
-    try {
-      video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-    } catch (error) {
-      note.textContent = "The camera could not be opened. Allow camera access, or type the code below.";
-      return;
-    }
-    await video.play();
-    video.hidden = false;
-    start.hidden = true;
-    const detector = new BarcodeDetector({ formats: ["qr_code"] });
-    let last = "", lastAt = 0;
-    const tick = async () => {
-      if (!video.srcObject) return;
-      try {
-        const codes = await detector.detect(video);
-        const value = codes.length ? codes[0].rawValue : "";
-        // The same code held in front of the camera is sent once, not on every frame.
-        if (value && (value !== last || Date.now() - lastAt > 4000)) {
-          last = value; lastAt = Date.now();
-          await submitScan(value);
-        }
-      } catch (error) { /* a frame that could not be read; try the next */ }
-      setTimeout(tick, 250);
-    };
-    tick();
-  });
 });

@@ -10,7 +10,7 @@
     <tbody>
       {% for row in events %}
       <tr>
-        <td>{{ row.event.name }}</td><td class="nowrap">{{ row.event.starts_at | ist }} IST</td>
+        <td>{{ row.event.name }} {% if row.today %}<span class="badge final">Today</span>{% endif %}</td><td class="nowrap">{{ row.event.starts_at | ist }} IST</td>
         <td class="num">{{ row.checked_in }} / {{ row.tickets }}</td>
         <td><a class="button small" href="/check-in/{{ row.event.id }}">Open the door</a></td>
       </tr>

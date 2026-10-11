@@ -2,17 +2,41 @@
 {% block title %}{{ certificate.title }} · WhoDoo{% endblock %}
 {% block content %}
 <p class="no-print actions"><a class="button secondary small" href="/certificates">All certificates</a>
-  <button class="small" onclick="window.print()">Print or save as PDF</button></p>
-<div class="certificate {{ 'revoked' if certificate.revoked_at }}">
-  <p class="muted">{{ certificate.club_name }}</p>
-  <h1>Certificate of {{ certificate.kind | label }}</h1>
-  <p>This certifies that</p>
-  <p class="name">{{ certificate.recipient_name }}</p>
-  <p><strong>{{ certificate.title }}</strong></p>
-  {% if certificate.note %}<p>{{ certificate.note }}</p>{% endif %}
-  <p class="muted">Issued {{ certificate.issued_at | nice_date }} by {{ certificate.issued_by_name }}</p>
-  {% if certificate.revoked_at %}<p><span class="badge cancelled">Revoked</span> {{ certificate.revoke_reason }}</p>{% endif %}
-  <div>{{ qr_svg | safe }}</div>
-  <p class="muted">Check it: {{ verify_url }}<br>Code {{ certificate.verify_code }}</p>
-</div>
+  <button class="small" onclick="window.print()">Print or save as PDF</button>
+  {% if not certificate.revoked_at %}<button class="small secondary" data-post="/api/v1/certificates/{{ certificate.id }}/email">Email it to {{ "me" if certificate.recipient_user_id == user.id else certificate.recipient_name }}</button>{% endif %}</p>
+
+{# One sheet, in the site's own look: cream paper, ink rules, the display face, one accent per kind. #}
+<article class="certificate kind-{{ certificate.kind }} {{ 'revoked' if certificate.revoked_at }}">
+  <header class="cert-top">
+    <span class="cert-mark" aria-hidden="true">W</span>
+    <span class="cert-club">{{ certificate.club_name }}</span>
+    <span class="cert-kind">{{ certificate.kind | label }}</span>
+  </header>
+
+  <div class="cert-body">
+    <h1>Certificate<br>of {{ certificate.kind | label }}</h1>
+    <p class="cert-lead">This certifies that</p>
+    <p class="cert-name"><span>{{ certificate.recipient_name }}</span></p>
+    <p class="cert-title">{{ certificate.title }}</p>
+    {% if certificate.event_name and certificate.event_name not in certificate.title %}<p class="cert-note">{{ certificate.event_name }}</p>{% endif %}
+    {% if certificate.note %}<p class="cert-note">{{ certificate.note }}</p>{% endif %}
+    {% if certificate.revoked_at %}<p class="cert-revoked"><span class="badge failed">Revoked</span> {{ certificate.revoke_reason }}</p>{% endif %}
+  </div>
+
+  <footer class="cert-foot">
+    <div class="cert-issued">
+      <strong>{{ certificate.issued_by_name }}</strong>
+      <span>Issued {{ certificate.issued_at | nice_date }}</span>
+    </div>
+    <div class="cert-verify">
+      <div class="cert-qr" aria-label="QR code to check this certificate">{{ qr_svg | safe }}</div>
+      <div class="cert-code">
+        <strong>Scan to verify</strong>
+        <span>or enter code</span>
+        <code>{{ certificate.verify_code[:4] }} {{ certificate.verify_code[4:8] }} {{ certificate.verify_code[8:12] }} {{ certificate.verify_code[12:] }}</code>
+        <span class="cert-url">{{ verify_host }}/verify</span>
+      </div>
+    </div>
+  </footer>
+</article>
 {% endblock %}

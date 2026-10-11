@@ -24,6 +24,7 @@ from app.services import (
     handover_service,
     membership_service,
     modules,
+    reminder_service,
     ticket_service,
 )
 from app.web.templating import render
@@ -58,7 +59,14 @@ async def memberships(request: Request, user: CurrentUser = Me, db: AsyncSession
         plans=await membership_service.list_plans(db, user, include_hidden=officer),
         members=await membership_service.list_members(db, user) if officer else [],
         officer=officer,
+        reminders=await _reminders(db, user),
     )
+
+
+async def _reminders(db: AsyncSession, user: CurrentUser):
+    found = await reminder_service.list_for(db, user, unread_only=True)
+    await db.commit()
+    return found
 
 
 @router.get("/memberships/return", dependencies=needs("memberships"))
@@ -174,9 +182,12 @@ async def verify_code(code: str, request: Request, db: AsyncSession = Db, _=Depe
 @router.get("/certificates/{certificate_id}", dependencies=needs("certificates"))
 async def certificate(certificate_id: uuid.UUID, request: Request, user: CurrentUser = Me, db: AsyncSession = Db):
     found = await certificate_service.get(db, user, certificate_id)
-    link = f"{get_settings().app_base_url.rstrip('/')}/verify/{found.verify_code}"
+    # The link in the QR code uses the address this page was opened at, so a phone on the same
+    # network can follow it. (APP_BASE_URL is often 127.0.0.1 in development, which a phone cannot reach.)
+    base = str(request.base_url).rstrip("/")
+    link = f"{base}/verify/{found.verify_code}"
     return render(request, "certificate.html", user, certificate=found, verify_url=link,
-                  qr_svg=gatesync_service.qr_svg(link))
+                  verify_host=base.split("://", 1)[-1], qr_svg=gatesync_service.qr_svg(link))
 
 
 # --- LegacyVault ------------------------------------------------------------------------

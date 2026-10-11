@@ -11,14 +11,17 @@ CrewPulse task on the event.
 """
 
 import base64
+import logging
 import secrets
 import uuid
 from datetime import datetime, timezone
 
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.dependencies import ROLE_EVENT_LEAD, CurrentUser
 from app.core.errors import conflict, forbidden, not_found
 from app.models.community import Certificate
@@ -26,7 +29,10 @@ from app.models.crewpulse import CrewTask
 from app.models.fairseat import EventTicket
 from app.models.shared import Club, Event, User
 from app.schemas.community import BulkCertificatesOut, CertificateIn, CertificateOut
-from app.services import audit_service, modules
+from app.db.database import SessionLocal
+from app.services import audit_service, email_service, modules
+
+logger = logging.getLogger("whodoo.certidoo")
 
 
 def _code() -> str:
@@ -133,7 +139,7 @@ async def issue_for_event(session: AsyncSession, issuer: CurrentUser, event_id: 
             session, club_id=issuer.club_id, actor_id=issuer.id, action="certidoo.issued_for_event",
             entity_type="event", entity_id=event.id, details={"kind": kind, "issued": len(created)},
         )
-    return BulkCertificatesOut(issued=len(created), already_had=len(people) - len(created))
+    return BulkCertificatesOut(issued=len(created), already_had=len(people) - len(created), issued_ids=created)
 
 
 async def mine(session: AsyncSession, user: CurrentUser) -> list[CertificateOut]:
@@ -190,3 +196,42 @@ async def revoke(session: AsyncSession, user: CurrentUser, certificate_id: uuid.
         entity_type="certificate", entity_id=certificate.id, details={"reason": reason},
     )
     return (await _present(session, [certificate]))[0]
+
+
+# --- Email ------------------------------------------------------------------------------
+
+
+async def send_email(certificate_id: uuid.UUID, db: AsyncSession | None = None) -> str | None:
+    """Email a certificate to the person it was issued to. Returns sent, saved or failed (see
+    email_service.deliver), or None when there is nothing to send. Runs after the response, on
+    its own session, and never raises: issuing must not depend on the mail server."""
+    async def run(session: AsyncSession) -> str | None:
+        certificate = await session.get(Certificate, certificate_id)
+        if certificate is None or certificate.revoked_at is not None:
+            return None
+        person = await session.get(User, certificate.recipient_user_id)
+        if person is None or not person.email:
+            return None
+        [shown] = await _present(session, [certificate])
+        base = get_settings().app_base_url.rstrip("/")
+        message = email_service.certificate_email(
+            to=person.email, recipient_name=shown.recipient_name, title=shown.title, kind=shown.kind,
+            club_name=shown.club_name or "Your club", issued_by=shown.issued_by_name or "The club",
+            issued_on=f"{shown.issued_at.astimezone():%d %b %Y}", verify_code=shown.verify_code,
+            verify_url=f"{base}/verify/{shown.verify_code}", page_url=f"{base}/certificates/{shown.id}",
+        )
+        return await run_in_threadpool(email_service.deliver, message)
+
+    try:
+        if db is not None:
+            return await run(db)
+        async with SessionLocal() as session:
+            return await run(session)
+    except Exception:
+        logger.exception("Certificate email for %s failed", certificate_id)
+        return None
+
+
+async def send_emails(certificate_ids: list[uuid.UUID]) -> None:
+    for certificate_id in certificate_ids:
+        await send_email(certificate_id)

@@ -31,6 +31,7 @@ from app.models.fairseat import EventTicket, TicketBooking, TicketCategory
 from app.models.registration import EventRegistration as R
 from app.models.shared import Event, User
 from app.services import audit_service, modules
+from app.services.syncsphere import IST
 
 PREFIX = "whodoo.ticket.v1."
 # 32 bytes are 43 base64url characters; the last one carries four zero padding bits.
@@ -75,7 +76,9 @@ def digest_of(credential: object) -> bytes | None:
 
 def qr_svg(credential: str) -> str:
     """The credential as an inline SVG QR code. Rendered on request, never saved."""
-    return segno.make(credential, error="m").svg_inline(scale=6, border=2, dark="#111", light="#fff")
+    # omitsize: the image carries a viewBox instead of a fixed pixel size, so it scales to the box
+    # it is placed in. With a fixed size, a box smaller than the code showed only its corner.
+    return segno.make(credential, error="m").svg_inline(scale=6, border=2, dark="#111", light="#fff", omitsize=True)
 
 
 async def issue_for_booking(session: AsyncSession, booking: TicketBooking, now: datetime | None = None) -> int:
@@ -169,8 +172,13 @@ async def events_for_door(session: AsyncSession, user: CurrentUser) -> list[dict
             .where(EventTicket.status.in_(("issued", "checked_in")))
             .group_by(EventTicket.event_id)
         )).all())
-    return [{"event": event, "tickets": counts[event.id][0], "checked_in": counts[event.id][1]}
-            for event in events if counts[event.id][0]]
+    now = utcnow()
+    listed = [{"event": event, "tickets": counts[event.id][0], "checked_in": counts[event.id][1],
+               "today": bool(event.starts_at and event.starts_at.astimezone(IST).date() == now.astimezone(IST).date())}
+              for event in events if counts[event.id][0]]
+    # Whatever is on today comes first: that is the door someone is standing at.
+    listed.sort(key=lambda row: not row["today"])
+    return listed
 
 
 async def _admit(

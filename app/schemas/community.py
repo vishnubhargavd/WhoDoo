@@ -106,6 +106,8 @@ class CertificateOut(BaseModel):
 class BulkCertificatesOut(BaseModel):
     issued: int
     already_had: int
+    # Which certificates were just made, for the route to email. Not part of the response.
+    issued_ids: list[uuid.UUID] = Field(default_factory=list, exclude=True)
 
 
 class RevokeIn(_Clean):

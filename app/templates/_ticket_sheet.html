@@ -1,0 +1,17 @@
+{# One printable ticket. Hidden on screen; when the page is printed (or saved as PDF) this is all
+   that appears. Expects: sheet_event, sheet_when, sheet_venue, sheet_name, sheet_id, sheet_qr,
+   and optionally sheet_extra (a seat or category line). #}
+<section class="ticket-sheet print-only">
+  <header class="ticket-sheet-top"><span class="cert-mark" aria-hidden="true">W</span><span>WhoDoo ticket</span><span class="ticket-sheet-tag">Admits one</span></header>
+  <div class="ticket-sheet-body">
+    <h2>{{ sheet_event }}</h2>
+    <dl>
+      <div><dt>When</dt><dd>{{ sheet_when }}</dd></div>
+      <div><dt>Where</dt><dd>{{ sheet_venue }}</dd></div>
+      <div><dt>Name</dt><dd>{{ sheet_name }}</dd></div>
+      <div><dt>{{ "Ticket" if sheet_extra else "Participant ID" }}</dt><dd>{{ sheet_extra or sheet_id }}</dd></div>
+    </dl>
+    <div class="ticket-sheet-qr">{{ sheet_qr | safe }}</div>
+    <p>Show this code at the entrance with your college ID. It admits one person, once: do not share it.</p>
+  </div>
+</section>

@@ -41,46 +41,118 @@ def qr_png(value: str) -> bytes:
     return buffer.getvalue()
 
 
+# --- One look for every email -----------------------------------------------------------
+# The site's colours, set inline on tables: mail apps ignore stylesheets and most modern CSS.
+INK, CREAM, PAPER, BUTTER, CORAL, MINT, COBALT = "#080808", "#f4efdf", "#fbfaf7", "#f4f068", "#f04b37", "#8de8bd", "#2858bd"
+HEAVY = "Impact, 'Anton', 'Arial Narrow Bold', 'Arial Black', Arial, sans-serif"   # the site's display face, where installed
+SANS = "Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+
+
+def _layout(*, club_name: str, tag: str, accent: str, accent_ink: str, heading: str, intro: str,
+            rows: list[tuple[str, str]], qr_cid: str, qr_caption: str, button: str, url: str, footnote: str) -> str:
+    """The HTML body shared by ticket and certificate emails. Every value is escaped here."""
+    details = "".join(
+        f'<tr><td style="padding:6px 16px 6px 0;font:600 11px {SANS};letter-spacing:1px;text-transform:uppercase;'
+        f'color:#5b5b55;white-space:nowrap;vertical-align:top">{escape(label)}</td>'
+        f'<td style="padding:6px 0;font:600 15px {SANS};color:{INK}">{escape(value)}</td></tr>'
+        for label, value in rows
+    )
+    return f"""<!doctype html><html><body style="margin:0;padding:0;background:{INK}">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:{INK}"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;background:{CREAM};border:3px solid {INK};border-radius:22px;overflow:hidden">
+  <tr><td style="background:{BUTTER};border-bottom:3px solid {INK};padding:14px 22px">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="font:400 20px {HEAVY};letter-spacing:0.5px;text-transform:uppercase;color:{INK}">{escape(club_name)}</td>
+      <td align="right"><span style="display:inline-block;padding:6px 12px;border:2px solid {INK};border-radius:999px;background:{accent};
+        font:700 10px {SANS};letter-spacing:1.2px;text-transform:uppercase;color:{accent_ink}">{escape(tag)}</span></td>
+    </tr></table></td></tr>
+  <tr><td style="padding:28px 26px 8px">
+    <h1 style="margin:0 0 10px;font:400 34px/1 {HEAVY};letter-spacing:0.5px;text-transform:uppercase;color:{INK}">{escape(heading)}</h1>
+    <p style="margin:0 0 18px;font:400 15px/1.5 {SANS};color:#3a3a36">{intro}</p>
+    <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px">{details}</table>
+  </td></tr>
+  <tr><td align="center" style="padding:0 26px 8px">
+    <table role="presentation" cellpadding="0" cellspacing="0" style="background:#ffffff;border:3px solid {INK};border-radius:16px"><tr>
+      <td align="center" style="padding:14px"><img src="cid:{qr_cid}" alt="QR code" width="220" height="220" style="display:block;border:0"></td></tr></table>
+    <p style="margin:10px 0 0;font:400 13px/1.45 {SANS};color:#3a3a36">{escape(qr_caption)}</p>
+  </td></tr>
+  <tr><td align="center" style="padding:18px 26px 26px">
+    <a href="{escape(url)}" style="display:inline-block;padding:13px 26px;background:{INK};border-radius:999px;
+      font:700 13px {SANS};letter-spacing:0.6px;text-transform:uppercase;color:{PAPER};text-decoration:none">{escape(button)}</a>
+  </td></tr>
+  <tr><td style="background:{PAPER};border-top:3px solid {INK};padding:14px 22px;font:400 12px/1.5 {SANS};color:#5b5b55">
+    {escape(footnote)}<br>Sent by WhoDoo for {escape(club_name)}.</td></tr>
+</table></td></tr></table></body></html>"""
+
+
+def _message(*, to: str, subject: str, club_name: str, text: str, html: str, cid: str, qr_value: str, filename: str) -> EmailMessage:
+    """A message with a plain-text part, the HTML part, and the QR code attached inline to the HTML."""
+    settings = get_settings()
+    sender = settings.mail_from or settings.smtp_user or "no-reply@whodoo.local"
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = formataddr((f"{club_name} via WhoDoo", sender))
+    message["To"] = to
+    message["Message-ID"] = make_msgid(domain="whodoo.local")
+    message.set_content(text)
+    message.add_alternative(html, subtype="html")
+    message.get_payload()[1].add_related(qr_png(qr_value), "image", "png", cid=f"<{cid}>", filename=filename)
+    return message
+
+
 def ticket_email(
     *, to: str, full_name: str, participant_code: str, event_name: str, club_name: str, when: str,
     venue: str, credential: str, ticket_url: str, amount: str,
 ) -> EmailMessage:
-    """The confirmation a participant receives: details in text, the QR ticket as an inline image."""
-    settings = get_settings()
-    sender = settings.mail_from or settings.smtp_user or "no-reply@whodoo.local"
-    message = EmailMessage()
-    message["Subject"] = f"Your ticket for {event_name} ({participant_code})"
-    message["From"] = formataddr((f"{club_name} via WhoDoo", sender))
-    message["To"] = to
-    message["Message-ID"] = make_msgid(domain="whodoo.local")
-    message.set_content(
+    """The confirmation a participant receives: the details, and the QR ticket as an inline image."""
+    cid = make_msgid(domain="whodoo.local")[1:-1]
+    text = (
         f"Hi {full_name},\n\nYou are registered successfully for {event_name}.\n\n"
         f"When: {when}\nWhere: {venue}\nParticipant ID: {participant_code}\nPaid: {amount}\n\n"
         f"Your QR ticket: {ticket_url}\n\n"
         "Show the QR code at the entrance along with your college ID. It admits one person, once, "
         "so do not share it.\n\n" + club_name + "\n"
     )
-    cid = make_msgid(domain="whodoo.local")
-    rows = "".join(
-        f'<tr><td style="padding:4px 16px 4px 0;color:#666">{escape(label)}</td>'
-        f'<td style="padding:4px 0"><strong>{escape(value)}</strong></td></tr>'
-        for label, value in (("When", when), ("Where", venue), ("Participant ID", participant_code), ("Paid", amount))
+    html = _layout(
+        club_name=club_name, tag="Ticket", accent=MINT, accent_ink=INK, heading="You're in.",
+        intro=f"Hi {escape(full_name)}, you are registered successfully for <strong>{escape(event_name)}</strong>. Here is your ticket.",
+        rows=[("Event", event_name), ("When", when), ("Where", venue), ("Participant ID", participant_code), ("Paid", amount)],
+        qr_cid=cid, qr_caption="Show this code at the entrance with your college ID. It admits one person, once: do not share it.",
+        button="Open your ticket", url=ticket_url,
+        footnote="Lost this email? Your ticket is always at the link above.",
     )
-    message.add_alternative(
-        f"""<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:auto;color:#111">
-<h2 style="margin:0 0 4px">You are registered successfully</h2>
-<p style="margin:0 0 16px;color:#444">Hi {escape(full_name)}, here is your ticket for <strong>{escape(event_name)}</strong>.</p>
-<table style="border-collapse:collapse;margin-bottom:16px">{rows}</table>
-<div style="border:2px solid #111;border-radius:16px;padding:16px;text-align:center">
-<img src="cid:{cid[1:-1]}" alt="QR ticket" width="240" height="240" style="display:block;margin:auto">
-<p style="margin:8px 0 0;font-size:13px;color:#444">Show this at the entrance with your college ID.<br>
-It admits one person, once. Do not share it.</p></div>
-<p style="font-size:13px"><a href="{escape(ticket_url)}">Open your ticket online</a></p>
-<p style="font-size:12px;color:#777">{escape(club_name)} · sent by WhoDoo</p></div>""",
-        subtype="html",
+    return _message(to=to, subject=f"Your ticket for {event_name} ({participant_code})", club_name=club_name,
+                    text=text, html=html, cid=cid, qr_value=credential, filename="ticket-qr.png")
+
+
+CERTIFICATE_ACCENTS = {"participation": (COBALT, "#ffffff"), "volunteering": (CORAL, INK), "achievement": (MINT, INK)}
+
+
+def certificate_email(
+    *, to: str, recipient_name: str, title: str, kind: str, club_name: str, issued_by: str, issued_on: str,
+    verify_code: str, verify_url: str, page_url: str,
+) -> EmailMessage:
+    """Tells someone a certificate has been issued to them. The QR code is the public check for it."""
+    cid = make_msgid(domain="whodoo.local")[1:-1]
+    spaced = " ".join(verify_code[i:i + 4] for i in range(0, len(verify_code), 4))
+    label = kind.replace("_", " ").capitalize()
+    text = (
+        f"Hi {recipient_name},\n\n{club_name} has issued you a certificate of {label.lower()}: {title}.\n\n"
+        f"Issued by: {issued_by}\nIssued on: {issued_on}\nVerification code: {spaced}\n\n"
+        f"Open and print it: {page_url}\nAnyone can check it is genuine at: {verify_url}\n\n{club_name}\n"
     )
-    message.get_payload()[1].add_related(qr_png(credential), "image", "png", cid=cid, filename="ticket-qr.png")
-    return message
+    accent, accent_ink = CERTIFICATE_ACCENTS.get(kind, (COBALT, "#ffffff"))
+    html = _layout(
+        club_name=club_name, tag=label, accent=accent, accent_ink=accent_ink, heading="Your certificate",
+        intro=f"Hi {escape(recipient_name)}, {escape(club_name)} has issued you a certificate of {escape(label.lower())}: "
+              f"<strong>{escape(title)}</strong>.",
+        rows=[("Awarded to", recipient_name), ("For", title), ("Issued by", issued_by), ("Issued on", issued_on), ("Code", spaced)],
+        qr_cid=cid, qr_caption="Anyone can scan this code, or enter the code above, to check the certificate is genuine.",
+        button="Open and print", url=page_url,
+        footnote="Opening the certificate needs your WhoDoo sign-in. The check by code needs none.",
+    )
+    return _message(to=to, subject=f"Your certificate: {title}", club_name=club_name, text=text, html=html, cid=cid,
+                    qr_value=verify_url, filename="certificate-qr.png")
 
 
 def _to_outbox(message: EmailMessage) -> Path:

@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block title %}My tickets · WhoDoo{% endblock %}
 {% block content %}
+{# One printable sheet per valid ticket; the page itself is for the screen. #}
+{% for item in bookings %}{% for t in item.tickets if t.qr_svg %}
+{% with sheet_event=item.event.name, sheet_when=(item.event.starts_at | ist) ~ " IST", sheet_venue=item.event.venue or "To be announced",
+        sheet_name=user.full_name, sheet_id="", sheet_extra=item.category.name ~ " · ticket " ~ t.seat_number ~ " of " ~ (item.tickets | length),
+        sheet_qr=t.qr_svg %}{% include "_ticket_sheet.html" %}{% endwith %}
+{% endfor %}{% endfor %}
+<div class="screen-only">
 <h1>My tickets</h1>
+<p class="no-print actions"><button class="small secondary" onclick="window.print()">Print or save as PDF</button></p>
 <p class="sub">Show a code at the door. Each code admits one person, once. Treat it like cash: anyone holding it can use it.</p>
 
 {% for item in bookings %}
@@ -31,4 +39,5 @@
 {% else %}
 <div class="card"><p class="empty">No tickets yet. <a href="/tickets">See what is on sale</a>.</p></div>
 {% endfor %}
+</div>
 {% endblock %}

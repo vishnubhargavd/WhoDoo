@@ -6,7 +6,7 @@ decided in the services from the signed-in user's row.
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.dependencies import CurrentUser, get_current_user, get_db
@@ -24,7 +24,15 @@ from app.schemas.community import (
     RevokeIn,
     ScanIn,
 )
-from app.services import announcement_service, certificate_service, gatesync_service, handover_service, modules
+from app.core.errors import AppError, conflict
+from app.services import (
+    announcement_service,
+    certificate_service,
+    email_service,
+    gatesync_service,
+    handover_service,
+    modules,
+)
 
 User = Depends(get_current_user)
 Db = Depends(get_db)
@@ -119,19 +127,37 @@ async def issued(user: CurrentUser = User, db: AsyncSession = Db) -> list[Certif
 
 
 @certificates.post("", response_model=CertificateOut, status_code=201)
-async def issue(body: CertificateIn, user: CurrentUser = User, db: AsyncSession = Db) -> CertificateOut:
-    """The treasurer or president; an event lead for an event they lead."""
+async def issue(body: CertificateIn, background: BackgroundTasks, user: CurrentUser = User, db: AsyncSession = Db) -> CertificateOut:
+    """The treasurer or president; an event lead for an event they lead. The recipient is emailed."""
     certificate = await certificate_service.issue(db, user, body)
     await db.commit()
+    background.add_task(certificate_service.send_email, certificate.id)
     return certificate
 
 
 @certificates.post("/for-event", response_model=BulkCertificatesOut)
-async def issue_for_event(body: BulkCertificatesIn, user: CurrentUser = User, db: AsyncSession = Db) -> BulkCertificatesOut:
-    """Participation for everyone checked in, or volunteering for everyone who finished a task."""
+async def issue_for_event(
+    body: BulkCertificatesIn, background: BackgroundTasks, user: CurrentUser = User, db: AsyncSession = Db
+) -> BulkCertificatesOut:
+    """Participation for everyone checked in, or volunteering for everyone who finished a task.
+    Each new recipient is emailed."""
     result = await certificate_service.issue_for_event(db, user, body.event_id, body.kind)
     await db.commit()
+    background.add_task(certificate_service.send_emails, result.issued_ids)
     return result
+
+
+@certificates.post("/{certificate_id}/email")
+async def email_certificate(certificate_id: uuid.UUID, user: CurrentUser = User, db: AsyncSession = Db) -> dict:
+    """Send the certificate email again, to its recipient only. Says what actually happened."""
+    found = await certificate_service.get(db, user, certificate_id)        # the recipient, or someone who can issue
+    if found.revoked_at is not None:
+        raise conflict("revoked", "A revoked certificate is not emailed.")
+    if not email_service.configured():
+        raise conflict("email_not_configured", "Email sending is not set up on this server, so nothing was sent.")
+    if await certificate_service.send_email(certificate_id, db) != "sent":
+        raise AppError(502, "email_failed", "The email could not be sent right now. Try again later.")
+    return {"status": "sent", "status_label": "sent", "title": "Certificate email"}
 
 
 @certificates.post("/{certificate_id}/revoke", response_model=CertificateOut)
