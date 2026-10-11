@@ -4,7 +4,7 @@ Used only when AUTH_MODE=supabase. Verifies who signed the token and nothing mor
 result is the Supabase Auth user id (`sub`). Club, role and membership never come from
 the token; app/core/dependencies.py looks them up in `users` through `auth_user_id`.
 
-Policy (see README_AUTH_BRIDGE.md):
+Policy (see docs/AUTH_BRIDGE.md):
 - the header must say alg ES256 and carry a kid; anything else is rejected before any
   key is looked at, so the mode is never chosen from the token;
 - the key is the JWKS entry with that kid (EC P-256 only); unknown kids trigger at most

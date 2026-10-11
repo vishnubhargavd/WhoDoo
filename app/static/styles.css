@@ -1,11 +1,11 @@
 /* WhoDoo design system.
-   Ported from the v0 design (frontend_design/): an ink frame around cream panels, paper
-   cards with ink outlines, Anton display type over Inter, pill controls, and four accents.
+   An ink frame around cream panels, paper cards with ink outlines,
+   Anton display type over Inter, pill controls, and four accents.
    Every app page (finance, store, events) is styled from the classes in this one file. */
 
 /* --- Tokens ---------------------------------------------------------------- */
 :root {
-  /* Palette (frontend_design/app/globals.css @theme) */
+  /* Core palette tokens */
   --ink: #080808;
   --cream: #f4efdf;
   --paper: #fbfaf7;
