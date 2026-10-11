@@ -1,4 +1,4 @@
-"""MemberCore tables (migrations/pending/030-032). Money is whole paise.
+"""MemberCore tables (migrations/030-032). Money is whole paise.
 
 The database enforces most of the rules here: a membership cannot be active without an
 activation grant, and renewals, dues, reconciliations and grants cannot be edited.

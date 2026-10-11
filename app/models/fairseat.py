@@ -1,4 +1,4 @@
-"""FairSeat tables (migrations/pending/020_fairseat.sql). Money is whole paise."""
+"""FairSeat tables (migrations/020_fairseat.sql). Money is whole paise."""
 
 import uuid
 from datetime import datetime
@@ -94,7 +94,7 @@ class TicketBooking(Base):
     cancelled_at: Mapped[datetime | None] = _moment(nullable=True)
     created_at: Mapped[datetime] = created_at_col()
     updated_at: Mapped[datetime] = updated_at_col()
-    # Payment and refund (migrations/pending/021_fairseat_payments.sql).
+    # Payment and refund (migrations/021_fairseat_payments.sql).
     stripe_checkout_session_id: Mapped[str | None] = mapped_column(Text, unique=True)
     stripe_payment_intent_id: Mapped[str | None] = mapped_column(Text, unique=True)
     paid_at: Mapped[datetime | None] = _moment(nullable=True)

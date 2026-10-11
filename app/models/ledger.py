@@ -11,7 +11,7 @@ from app.models.base import Base, created_at_col, updated_at_col, uuid_pk
 ENTRY_TYPES = ("income", "expense", "reimbursement", "refund", "adjustment")
 SOURCE_MODULES = ("membership", "event_ticket", "merchandise", "expense_claim", "fundraiser", "manual")
 PAYMENT_STATUSES = ("pending", "approved", "paid", "rejected", "refunded")
-EXPENSE_CATEGORIES = ("supplies", "food", "travel", "printing", "decoration", "other")
+EXPENSE_CATEGORIES = ("supplies", "food", "travel", "printing", "decoration", "prizes", "goodies", "other")
 
 
 class LedgerEntry(Base):

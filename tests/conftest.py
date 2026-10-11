@@ -29,20 +29,18 @@ from sqlalchemy import text  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.core.security import create_access_token  # noqa: E402
 from app.db.database import SessionLocal, asyncpg_dsn  # noqa: E402
-from app.db.migrate import run_migrations, run_pending_migrations  # noqa: E402
+from app.db.migrate import run_migrations  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.shared import Club, Event, User  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
 async def _schema():
-    """Rebuild the disposable test database: the real migrations, then the pending ones
-    (FairSeat, MemberCore, GateSync, Connect, CertiDoo, LegacyVault), which `make migrate` does not apply."""
+    """Rebuild the disposable test database from every migration."""
     url = get_settings().database_url
     assert "test" in url.rsplit("/", 1)[-1], f"Refusing to reset a non-test database: {url}"
     assert get_settings().database_is_local, f"Refusing to reset a database that is not local: {url}"
     await run_migrations(asyncpg_dsn(url), reset=True)
-    await run_pending_migrations(asyncpg_dsn(url))
 
 
 @pytest.fixture(scope="session")

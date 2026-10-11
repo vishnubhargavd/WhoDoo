@@ -9,7 +9,7 @@ from app.models.base import Base, created_at_col, updated_at_col
 
 
 class EventTicketSettings(Base):
-    """One row per ticketed event (migrations/pending/021_fairseat_event_settings.sql). Locked
+    """One row per ticketed event (migrations/021_fairseat_event_settings.sql). Locked
     after the event row and before its categories by everything that changes seats.
 
     Ticket categories are app.models.fairseat.TicketCategory: there is one category table."""

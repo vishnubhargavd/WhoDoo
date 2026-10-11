@@ -12,7 +12,7 @@ async def run_migrations(dsn: str, *, reset: bool = False) -> list[str]:
     conn = await asyncpg.connect(dsn)
     try:
         if reset:
-            # MemberCore (pending/031) keeps its trigger functions in a schema of its own.
+            # MemberCore (migration 031) keeps its trigger functions in a schema of its own.
             await conn.execute(
                 "DROP SCHEMA public CASCADE; DROP SCHEMA IF EXISTS membercore_internal CASCADE; CREATE SCHEMA public;"
             )
@@ -20,7 +20,9 @@ async def run_migrations(dsn: str, *, reset: bool = False) -> list[str]:
             "CREATE TABLE IF NOT EXISTS schema_migrations ("
             "name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
         )
-        done = {row["name"] for row in await conn.fetch("SELECT name FROM schema_migrations")}
+        # A database that took the modules while they were optional recorded them as
+        # "pending/<name>". Those count as applied, so they are not run a second time.
+        done = {row["name"].removeprefix("pending/") for row in await conn.fetch("SELECT name FROM schema_migrations")}
         applied = []
         for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
             if path.name in done:
@@ -35,23 +37,6 @@ async def run_migrations(dsn: str, *, reset: bool = False) -> list[str]:
 
 
 async def run_pending_migrations(dsn: str) -> list[str]:
-    """Apply migrations/pending/*.sql that have not run here yet, recorded as `pending/<name>`.
-
-    These are the optional modules' tables. `run_migrations` never applies them; the caller
-    decides where they may go (scripts/migrate_pending.py allows a local database only).
-    """
-    conn = await asyncpg.connect(dsn)
-    try:
-        done = {row["name"] for row in await conn.fetch("SELECT name FROM schema_migrations")}
-        applied = []
-        for path in sorted((MIGRATIONS_DIR / "pending").glob("*.sql")):
-            name = f"pending/{path.name}"
-            if name in done:
-                continue
-            async with conn.transaction():
-                await conn.execute(path.read_text())
-                await conn.execute("INSERT INTO schema_migrations (name) VALUES ($1)", name)
-            applied.append(name)
-        return applied
-    finally:
-        await conn.close()
+    """Kept for scripts that still call it. The optional modules' migrations used to live in
+    migrations/; they are ordinary migrations now, so this is the same as run_migrations."""
+    return await run_migrations(dsn)

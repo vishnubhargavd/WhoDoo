@@ -1,4 +1,4 @@
-"""Tables for GateSync, CrewDoo Connect, CertiDoo and LegacyVault (migrations/pending/033-036)."""
+"""Tables for GateSync, CrewDoo Connect, CertiDoo and LegacyVault (migrations/033-036)."""
 
 import uuid
 from datetime import datetime

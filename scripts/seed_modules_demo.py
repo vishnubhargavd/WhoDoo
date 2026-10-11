@@ -1,7 +1,6 @@
 """Add demo data for the optional modules to the seeded club.
 
-    python -m scripts.migrate_pending       # first: the modules' tables (local database only)
-    python -m scripts.seed_modules_demo     # then: plans, tickets on sale, announcements, notes
+    python -m scripts.seed_modules_demo     # plans, tickets on sale, announcements, handover notes
 
 Never drops or truncates anything. Refuses to run twice. Writes go through the same
 services as the API. Nobody is made a member and nothing is paid: joining, paying, booking
@@ -32,7 +31,7 @@ async def seed(session) -> None:
     found = await modules.load(session)
     missing = {"memberships", "announcements", "handover"} - found
     if missing:
-        raise SystemExit("Run `python -m scripts.migrate_pending` first (missing: " + ", ".join(sorted(missing)) + ").")
+        raise SystemExit("Run `python -m scripts.migrate` first (missing: " + ", ".join(sorted(missing)) + ").")
     club = await session.scalar(select(Club).order_by(Club.created_at).limit(1))
     if club is None:
         raise SystemExit("No club found. Run `python -m scripts.seed_finance_demo --reset` first.")
