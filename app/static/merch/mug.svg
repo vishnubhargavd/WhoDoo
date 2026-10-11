@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="Mug">
+  <rect width="400" height="300" fill="#f04b37"/>
+  <circle cx="330" cy="62" r="34" fill="#fbfaf7" stroke="#080808" stroke-width="3"/>
+  <text x="330" y="74" text-anchor="middle" font-family="Impact, 'Arial Narrow Bold', sans-serif" font-size="34" fill="#080808">W</text>
+  <g stroke="#080808" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M110 95 L260 95 L250 235 Q185 255 120 235 Z" fill="#fbfaf7"/>
+    <path d="M258 125 Q320 125 315 170 Q310 215 253 205" fill="none"/>
+    <ellipse cx="185" cy="95" rx="75" ry="14" fill="#f4f068"/>
+    <path d="M150 150 L165 190 L185 160 L205 190 L220 150" fill="none"/>
+    <path d="M160 70 Q170 55 160 40 M190 70 Q200 55 190 40 M220 70 Q230 55 220 40" fill="none" stroke-width="4"/>
+  </g>
+</svg>

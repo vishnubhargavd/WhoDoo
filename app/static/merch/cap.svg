@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="Cap">
+  <rect width="400" height="300" fill="#2858bd"/>
+  <circle cx="330" cy="62" r="34" fill="#fbfaf7" stroke="#080808" stroke-width="3"/>
+  <text x="330" y="74" text-anchor="middle" font-family="Impact, 'Arial Narrow Bold', sans-serif" font-size="34" fill="#080808">W</text>
+  <g stroke="#080808" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M95 190 Q95 95 200 95 Q305 95 305 190 Z" fill="#f4f068"/>
+    <path d="M95 190 Q200 165 305 190 Q345 195 365 215 Q260 205 95 215 Z" fill="#f04b37"/>
+    <circle cx="200" cy="96" r="9" fill="#fbfaf7"/>
+    <path d="M200 105 L200 180" fill="none" stroke-width="4"/>
+  </g>
+</svg>

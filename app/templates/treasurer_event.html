@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Cash flow · {{ flow.event.name }} · WhoDoo{% endblock %}
+{% block content %}
+<p><a href="/treasurer">← Finance dashboard</a></p>
+<div class="actions" style="justify-content: space-between; align-items: flex-start">
+  <div>
+    <h1>{{ flow.event.name }}</h1>
+    <p class="sub">Cash flow · {{ flow.event.starts_at | ist if flow.event.starts_at else "No date yet" }} · every figure comes from the ledger</p>
+  </div>
+  <span class="actions">
+    <a class="button secondary small" href="/events/{{ flow.event.id }}">Event page</a>
+    <a class="button secondary small" href="/treasurer/ledger?event_id={{ flow.event.id }}">In the ledger</a>
+  </span>
+</div>
+{% set b = flow.budget %}
+
+<div class="grid">
+  <div class="stat"><div class="label">Money in</div><div class="value pos">{{ flow.in.total | inr }}</div>
+    <div class="hint">{{ flow.in.registration_count + flow.in.ticket_count }} paid registration{{ "" if flow.in.registration_count + flow.in.ticket_count == 1 else "s" }}</div></div>
+  <div class="stat"><div class="label">Refunded</div><div class="value">{{ flow.refunds | inr }}</div></div>
+  <div class="stat"><div class="label">Money out</div><div class="value neg">{{ flow.out.paid | inr }}</div>
+    <div class="hint">{{ (flow.out.committed + flow.out.pending) | inr }} more approved or waiting</div></div>
+  <div class="stat"><div class="label">Net so far</div><div class="value {{ 'neg' if flow.net < 0 else 'pos' }}">{{ flow.net | inr }}</div>
+    <div class="hint">{{ flow.net_after_commitments | inr }} once everything waiting is paid</div></div>
+</div>
+
+<div class="grid two">
+  <div class="card">
+    <h2>Money in</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>From</th><th class="num">Payments</th><th class="num">Amount</th></tr></thead>
+      <tbody>
+        <tr><td>Event registrations</td><td class="num">{{ flow.in.registration_count }}</td><td class="num">{{ flow.in.registrations | inr }}</td></tr>
+        <tr><td>FairSeat tickets</td><td class="num">{{ flow.in.ticket_count }}</td><td class="num">{{ flow.in.tickets | inr }}</td></tr>
+        <tr><td>Merchandise for this event</td><td class="num">—</td><td class="num">{{ flow.in.merchandise | inr }}</td></tr>
+        <tr><td>Other income</td><td class="num">—</td><td class="num">{{ flow.in.other | inr }}</td></tr>
+        <tr><td>Refunds</td><td class="num">—</td><td class="num neg">−{{ flow.refunds | inr }}</td></tr>
+        <tr class="total-row"><td><strong>Kept</strong></td><td></td><td class="num"><strong>{{ (flow.in.total - flow.refunds) | inr }}</strong></td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Budget {% if b.over_budget %}<span class="badge failed">Over budget</span>{% endif %}</h2>
+    {% if b.budget_paise is not none %}
+    {% set used = ((b.spent_paise + b.committed_paise) * 100 // b.budget_paise) if b.budget_paise else 100 %}
+    <p><strong>{{ (b.spent_paise + b.committed_paise) | paise }}</strong> of {{ b.budget_paise | paise }} used</p>
+    <div class="budget-bar" aria-hidden="true"><span class="{{ 'over' if b.over_budget }}" style="width: {{ [used, 100] | min }}%"></span></div>
+    <p class="muted">{{ b.remaining_paise | paise }} remaining{% if b.pending_paise %} · {{ b.pending_paise | paise }} more in claims waiting for approval{% endif %}</p>
+    {% if b.warning %}<div class="notice {{ 'error' if b.over_budget else 'info' }}">{{ b.warning }} Nothing is blocked; this is a warning.</div>{% endif %}
+    {% else %}
+    <p class="empty">No budget set. Set one on the <a href="/events/{{ flow.event.id }}">event page</a> to track spending against it.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Money out, by what it was for</h2>
+  {% if flow.out.lines %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Category</th><th class="num">Paid</th><th class="num">Approved, not paid</th><th class="num">Waiting for approval</th><th class="num">Total</th></tr></thead>
+    <tbody>
+      {% for line in flow.out.lines %}
+      <tr><td>{{ line.category | label }}</td><td class="num">{{ line.paid | inr }}</td><td class="num">{{ line.committed | inr }}</td>
+        <td class="num">{{ line.pending | inr }}</td><td class="num">{{ (line.paid + line.committed + line.pending) | inr }}</td></tr>
+      {% endfor %}
+      <tr class="total-row"><td><strong>Total</strong></td><td class="num"><strong>{{ flow.out.paid | inr }}</strong></td>
+        <td class="num"><strong>{{ flow.out.committed | inr }}</strong></td><td class="num"><strong>{{ flow.out.pending | inr }}</strong></td>
+        <td class="num"><strong>{{ (flow.out.paid + flow.out.committed + flow.out.pending) | inr }}</strong></td></tr>
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="empty">Nothing has been spent or claimed for this event yet.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Every entry</h2>
+  {% if flow.entries %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>Date</th><th>What</th><th>Kind</th><th>Status</th><th class="num">In</th><th class="num">Out</th></tr></thead>
+    <tbody>
+      {% for e in flow.entries %}
+      <tr><td class="nowrap">{{ e.created_at | nice_date }}</td><td>{{ e.description or "—" }}</td>
+        <td>{{ e.entry_type | label }}{% if e.category %} · {{ e.category | label }}{% endif %}</td>
+        <td><span class="badge {{ e.payment_status }}">{{ e.payment_status | label }}</span></td>
+        <td class="num pos">{{ e.amount | inr if e.direction == "credit" else "" }}</td>
+        <td class="num neg">{{ e.amount | inr if e.direction == "debit" else "" }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="empty">No ledger entries for this event yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

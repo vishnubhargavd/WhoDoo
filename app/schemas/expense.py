@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.schemas.common import Money, ORMModel, PositiveMoney
 
-ExpenseCategory = Literal["supplies", "food", "travel", "printing", "decoration", "other"]
+ExpenseCategory = Literal["supplies", "food", "travel", "printing", "decoration", "prizes", "goodies", "other"]
 ClaimStatus = Literal["draft", "pending_approval", "approved", "rejected", "change_requested", "paid"]
 ClaimAction = Literal["approve", "reject", "request_changes", "mark_paid", "resubmit"]
 

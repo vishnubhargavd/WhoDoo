@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="Hoodie">
+  <rect width="400" height="300" fill="#f4f068"/>
+  <circle cx="330" cy="62" r="34" fill="#fbfaf7" stroke="#080808" stroke-width="3"/>
+  <text x="330" y="74" text-anchor="middle" font-family="Impact, 'Arial Narrow Bold', sans-serif" font-size="34" fill="#080808">W</text>
+  <g stroke="#080808" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M150 70 L115 85 L70 150 L100 175 L125 140 L125 250 L275 250 L275 140 L300 175 L330 150 L285 85 L250 70 Q200 110 150 70 Z" fill="#2858bd"/>
+    <path d="M150 70 Q200 30 250 70 Q200 110 150 70 Z" fill="#fbfaf7"/>
+    <path d="M160 190 L240 190 L250 235 L150 235 Z" fill="#fbfaf7"/>
+    <path d="M188 100 L188 140 M212 100 L212 140" fill="none"/>
+  </g>
+</svg>

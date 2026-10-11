@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="Club merchandise">
+  <rect width="400" height="300" fill="#f4efdf"/>
+  <circle cx="330" cy="62" r="34" fill="#fbfaf7" stroke="#080808" stroke-width="3"/>
+  <text x="330" y="74" text-anchor="middle" font-family="Impact, 'Arial Narrow Bold', sans-serif" font-size="34" fill="#080808">W</text>
+  <g stroke="#080808" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M200 60 L310 110 L310 215 L200 265 L90 215 L90 110 Z" fill="#f4f068"/>
+    <path d="M90 110 L200 160 L310 110 M200 160 L200 265" fill="none"/>
+    <path d="M145 85 L255 135" fill="none" stroke="#f04b37" stroke-width="12"/>
+  </g>
+</svg>

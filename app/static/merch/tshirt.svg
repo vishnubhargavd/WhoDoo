@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="T-shirt">
+  <rect width="400" height="300" fill="#8de8bd"/>
+  <circle cx="330" cy="62" r="34" fill="#fbfaf7" stroke="#080808" stroke-width="3"/>
+  <text x="330" y="74" text-anchor="middle" font-family="Impact, 'Arial Narrow Bold', sans-serif" font-size="34" fill="#080808">W</text>
+  <g stroke="#080808" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M150 65 L95 85 L60 140 L100 165 L120 135 L120 250 L280 250 L280 135 L300 165 L340 140 L305 85 L250 65 Q200 105 150 65 Z" fill="#f04b37"/>
+    <path d="M150 65 Q200 105 250 65" fill="none"/>
+    <rect x="165" y="140" width="70" height="46" rx="8" fill="#f4f068"/>
+  </g>
+</svg>

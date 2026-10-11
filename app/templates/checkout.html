@@ -47,13 +47,19 @@
     <a class="button secondary" href="/store">Back to store</a>
   {% elif not is_owner %}
     <p class="muted">Only the buyer can pay for this order.</p>
-  {% elif provider.is_mock %}
-    <div class="actions">
-      <button class="success" id="pay-ok">Pay {{ order.total_amount | inr }} (mock success)</button>
-      <button class="danger" id="pay-fail">Simulate a declined card</button>
-    </div>
   {% else %}
-    <button class="success" id="pay-stripe">Pay {{ order.total_amount | inr }} with Stripe</button>
+    {# The amount on the left, the way to pay it on the right: the same bar on every payment page. #}
+    <div class="pay-bar">
+      <div class="pay-amount"><span>To pay</span><strong>{{ order.total_amount | inr }}</strong></div>
+      <div class="actions">
+        {% if provider.is_mock %}
+        <button class="danger" id="pay-fail">Simulate a declined card</button>
+        <button class="success" id="pay-ok">Pay {{ order.total_amount | inr }} (mock)</button>
+        {% else %}
+        <button class="success" id="pay-stripe">Pay {{ order.total_amount | inr }} with Stripe</button>
+        {% endif %}
+      </div>
+    </div>
   {% endif %}
 </div>
 {% endblock %}

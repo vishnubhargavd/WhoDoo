@@ -4,8 +4,7 @@
 <p><a href="/store">← Back to store</a></p>
 <div class="grid two">
   <div class="card product">
-    {% if product.image_url %}<img src="{{ product.image_url }}" alt="{{ product.name }}" style="height: 260px">
-    {% else %}<div class="noimg" style="height: 260px">{{ product.name[0] }}</div>{% endif %}
+    <img src="{{ product_image(product) }}" alt="{{ product.name }}" style="height: 260px">
     <h1 style="margin-top: 14px">{{ product.name }}</h1>
     <p class="sub">{{ product.description or "" }}</p>
     <dl class="kv">

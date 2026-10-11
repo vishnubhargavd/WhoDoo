@@ -14,7 +14,7 @@ from app.schemas.ledger import (
     LedgerSummary,
     ManualEntryCreate,
 )
-from app.services import ledger_service, shared_directory
+from app.services import cashflow_service, ledger_service, shared_directory
 
 router = APIRouter(prefix="/ledger", tags=["TrustLedger"])
 
@@ -34,6 +34,25 @@ async def ledger_entries(
 ) -> LedgerEntryPage:
     items, total = await ledger_service.list_entries(db, user.club_id, filters)
     return LedgerEntryPage(items=items, total=total, limit=filters.limit, offset=filters.offset)
+
+
+@router.get("/events/{event_id}/cash-flow")
+async def event_cash_flow(
+    event_id: uuid.UUID, user: CurrentUser = Depends(require_finance_admin), db: AsyncSession = Depends(get_db)
+) -> dict:
+    """Money in and out for one event, against its budget. Amounts in rupees; the budget in paise."""
+    flow = await cashflow_service.event_cash_flow(db, user, event_id)
+    return {
+        "event_id": flow["event"].id, "event_name": flow["event"].name,
+        "money_in": flow["in"], "refunds": flow["refunds"], "money_out": flow["out"],
+        "net": flow["net"], "net_after_commitments": flow["net_after_commitments"], "budget": flow["budget"],
+    }
+
+
+@router.get("/overview")
+async def money_overview(user: CurrentUser = Depends(require_finance_admin), db: AsyncSession = Depends(get_db)) -> dict:
+    """Where the club's money came from and went: by source, with merchandise broken out."""
+    return await cashflow_service.overview(db, user.club_id)
 
 
 @router.get("/events/{event_id}/profit-loss", response_model=EventProfitLoss)

@@ -7,7 +7,7 @@
 {% for product in products %}
 <div class="card">
   <div class="actions" style="justify-content: space-between">
-    <h2>{{ product.name }}
+    <h2><img class="merch-thumb" src="{{ product_image(product) }}" alt="">{{ product.name }}
       <span class="badge {{ 'paid' if product.is_active else 'cancelled' }}">{{ "On sale" if product.is_active else "Hidden" }}</span>
     </h2>
     <button class="small secondary" data-put="/api/v1/merch/products/{{ product.id }}"

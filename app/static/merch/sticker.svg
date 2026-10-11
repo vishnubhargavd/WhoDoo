@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" role="img" aria-label="Sticker pack">
+  <rect width="400" height="300" fill="#8de8bd"/>
+  <circle cx="330" cy="62" r="34" fill="#fbfaf7" stroke="#080808" stroke-width="3"/>
+  <text x="330" y="74" text-anchor="middle" font-family="Impact, 'Arial Narrow Bold', sans-serif" font-size="34" fill="#080808">W</text>
+  <g stroke="#080808" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M130 70 L270 70 Q300 70 300 100 L300 190 L250 240 L130 240 Q100 240 100 210 L100 100 Q100 70 130 70 Z" fill="#fbfaf7"/>
+    <path d="M300 190 L250 190 L250 240 Z" fill="#f4f068"/>
+    <circle cx="200" cy="145" r="42" fill="#f04b37"/>
+    <path d="M182 138 L182 139 M218 138 L218 139 M180 158 Q200 176 220 158" fill="none"/>
+  </g>
+</svg>

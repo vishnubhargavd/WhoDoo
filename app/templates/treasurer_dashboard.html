@@ -32,28 +32,56 @@
 </div>
 
 <div class="card">
-  <h2>Event profit and loss</h2>
-  {% if event_results %}
+  <h2>Money generated</h2>
+  <p class="muted">Everything the club has taken in, by where it came from. Paid entries only.</p>
+  <div class="grid">
+    {% for source in overview.sources %}
+    <div class="stat"><div class="label">{{ source.label }}</div><div class="value">{{ source.amount | inr }}</div>
+      {% if overview.generated %}<div class="hint">{{ (source.amount * 100 / overview.generated) | round | int }}% of income</div>{% endif %}</div>
+    {% endfor %}
+  </div>
+  <div class="table-wrap"><table>
+    <tbody>
+      <tr><td>Total generated</td><td class="num"><strong>{{ overview.generated | inr }}</strong></td></tr>
+      <tr><td>Refunded</td><td class="num neg">−{{ overview.refunds | inr }}</td></tr>
+      <tr><td>Paid out (expenses and reimbursements)</td><td class="num neg">−{{ overview.paid_out | inr }}</td></tr>
+      <tr class="total-row"><td><strong>Net</strong></td><td class="num {{ 'neg' if overview.net < 0 else 'pos' }}"><strong>{{ overview.net | inr }}</strong></td></tr>
+      <tr><td class="muted">Approved but not paid yet</td><td class="num muted">{{ overview.committed | inr }}</td></tr>
+    </tbody>
+  </table></div>
+</div>
+
+<div class="card">
+  <h2>Merchandise</h2>
+  <div class="grid">
+    <div class="stat"><div class="label">Orders paid</div><div class="value">{{ overview.merchandise.orders }}</div></div>
+    <div class="stat"><div class="label">Items sold</div><div class="value">{{ overview.merchandise.items }}</div></div>
+    <div class="stat"><div class="label">Revenue</div><div class="value pos">{{ overview.merchandise.revenue | inr }}</div></div>
+    <div class="stat"><div class="label">Refunded</div><div class="value">{{ overview.merchandise.refunds | inr }}</div></div>
+  </div>
+  <p class="muted">Counted in "Money generated" above. <a href="/admin/merch/orders">See the orders</a>.</p>
+</div>
+
+<div class="card">
+  <h2>Cash flow by event</h2>
+  {% if event_rows %}
   <div class="table-wrap">
     <table>
       <thead>
-        <tr>
-          <th>Event</th><th class="num">Tickets sold</th><th class="num">Ticket income</th>
-          <th class="num">Merch income</th><th class="num">Approved expenses</th>
-          <th class="num">Reimbursements paid</th><th class="num">Net</th><th>Result</th>
-        </tr>
+        <tr><th>Event</th><th class="num">Paid registrations</th><th class="num">Money in</th><th class="num">Money out</th>
+          <th class="num">Approved or waiting</th><th class="num">Net</th><th class="num">Budget</th><th></th></tr>
       </thead>
       <tbody>
-        {% for row in event_results %}
+        {% for row in event_rows %}
         <tr>
-          <td><a href="/treasurer/ledger?event_id={{ row.event_id }}">{{ row.event_name }}</a></td>
-          <td class="num">{{ row.tickets_sold }}</td>
-          <td class="num">{{ row.ticket_income | inr }}</td>
-          <td class="num">{{ row.merchandise_income | inr }}</td>
-          <td class="num">{{ row.approved_expenses | inr }}</td>
-          <td class="num">{{ row.paid_reimbursements | inr }}</td>
-          <td class="num {{ 'neg' if row.net_profit_loss < 0 else 'pos' }}">{{ row.net_profit_loss | inr }}</td>
-          <td><span class="badge {{ 'paid' if row.result == 'profit' else 'rejected' if row.result == 'loss' else '' }}">{{ row.result | label }}</span></td>
+          <td>{{ row.event.name }}</td>
+          <td class="num">{{ row.registrations }}</td>
+          <td class="num">{{ row.money_in | inr }}</td>
+          <td class="num">{{ row.money_out | inr }}</td>
+          <td class="num">{{ row.committed | inr }}</td>
+          <td class="num {{ 'neg' if row.net < 0 else 'pos' }}">{{ row.net | inr }}</td>
+          <td class="num">{% if row.budget is not none %}{{ row.budget | inr }}{% if row.over_budget %} <span class="badge failed">Over</span>{% endif %}{% else %}—{% endif %}</td>
+          <td><a class="button small secondary" href="/treasurer/events/{{ row.event.id }}">Cash flow</a></td>
         </tr>
         {% endfor %}
       </tbody>

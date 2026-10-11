@@ -11,8 +11,7 @@
 <div class="grid" style="grid-template-columns: repeat(auto-fill, minmax(230px, 1fr))">
   {% for product in products %}
   <a class="card product" href="/store/{{ product.id }}" style="color: inherit; text-decoration: none">
-    {% if product.image_url %}<img src="{{ product.image_url }}" alt="{{ product.name }}">
-    {% else %}<div class="noimg">{{ product.name[0] }}</div>{% endif %}
+    <img src="{{ product_image(product) }}" alt="{{ product.name }}" loading="lazy">
     <h2 style="margin-top: 10px">{{ product.name }}</h2>
     <div class="price">
       {{ product.your_price | inr }}
